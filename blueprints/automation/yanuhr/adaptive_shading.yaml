@@ -105,8 +105,7 @@ action:
               sequence:
                 - wait_for_trigger:
                     - platform: state
-                      entity_id:
-                        - "{{ repeat.item.window_sensor }}"
+                      entity_id: !template "{{ repeat.item.window_sensor }}"
                       to: "off"
                   timeout:
                     minutes: 5
