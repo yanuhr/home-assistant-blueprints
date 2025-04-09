@@ -1,0 +1,145 @@
+blueprint:
+  name: Adaptívne tienenie - viac miestností (zdieľaný svetelný senzor)
+  description: >
+    Automatické ovládanie roliet pre viacero miestností na základe jedného senzora osvetlenia.
+    Zohľadňuje otvorené okná, úroveň osvetlenia, čas a západ slnka. Odosiela notifikácie pri otvorenom okne.
+
+  domain: automation
+  input:
+    lux_sensor:
+      name: Senzor osvetlenia (spoločný)
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+
+    morning_trigger_time:
+      name: Ranný čas spustenia
+      default: "07:30:00"
+      selector:
+        time: {}
+
+    cover_configs:
+      name: Miestnosti a zariadenia
+      description: >
+        Zoznam miestností. Každá položka musí obsahovať názov, senzor okna a roletu.
+      selector:
+        object: {}
+
+    notify_user1:
+      name: Notifikácia - Používateľ 1 (voliteľné)
+      default: []
+      selector:
+        entity:
+          domain: notify
+
+    notify_user2:
+      name: Notifikácia - Používateľ 2 (voliteľné)
+      default: []
+      selector:
+        entity:
+          domain: notify
+
+trigger:
+  - platform: time
+    at: !input morning_trigger_time
+
+  - platform: numeric_state
+    entity_id: !input lux_sensor
+    below: 600
+    for:
+      minutes: 5
+
+  - platform: numeric_state
+    entity_id: !input lux_sensor
+    above: 800
+    for:
+      minutes: 5
+
+condition:
+  - condition: time
+    after: !input morning_trigger_time
+  - condition: sun
+    before: sunset
+
+action:
+  - variables:
+      lux: "{{ states(!input lux_sensor) | float(0) }}"
+      rooms: !input cover_configs
+      open_windows: []
+      after_sunset: "{{ state_attr('sun.sun', 'elevation') | float(1) < 0 }}"
+
+  - repeat:
+      for_each: "{{ rooms }}"
+      sequence:
+        - variables:
+            name: "{{ repeat.item.name }}"
+            window_sensor: "{{ repeat.item.window_sensor }}"
+            cover: "{{ repeat.item.cover }}"
+            window_open: "{{ is_state(repeat.item.window_sensor, 'on') }}"
+            window_closed: "{{ is_state(repeat.item.window_sensor, 'off') }}"
+
+        - choose:
+            - alias: "Ráno otvorenie"
+              conditions:
+                - condition: template
+                  value_template: "{{ trigger.platform == 'time' and lux > 800 and not after_sunset }}"
+              sequence:
+                - service: cover.open_cover
+                  target:
+                    entity_id: "{{ cover }}"
+
+            - alias: "Stmievanie - zhromaždiť otvorené okná"
+              conditions:
+                - condition: template
+                  value_template: "{{ lux < 600 and window_open and not after_sunset }}"
+              sequence:
+                - variables:
+                    open_windows: "{{ open_windows + [name] }}"
+
+            - alias: "Stmievanie - zatvorenie pri zatvorenom okne"
+              conditions:
+                - condition: template
+                  value_template: "{{ lux < 600 and window_closed and not after_sunset }}"
+              sequence:
+                - delay:
+                    seconds: 30
+                - service: cover.close_cover
+                  target:
+                    entity_id: "{{ cover }}"
+
+            - alias: "Rozjasnenie - otvorenie"
+              conditions:
+                - condition: template
+                  value_template: "{{ lux > 800 and not after_sunset }}"
+              sequence:
+                - service: cover.open_cover
+                  target:
+                    entity_id: "{{ cover }}"
+
+            - alias: "Zatvorenie pred západom slnka"
+              conditions:
+                - condition: sun
+                  before: sunset
+                  before_offset: "-00:30:00"
+                - condition: template
+                  value_template: "{{ window_closed }}"
+              sequence:
+                - service: cover.close_cover
+                  target:
+                    entity_id: "{{ cover }}"
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ open_windows | length > 0 }}"
+        sequence:
+          - service: notify.notify
+            data:
+              target: [!input notify_user1, !input notify_user2]
+              title: "Upozornenie: otvorené okná"
+              message: >-
+                Vonku sa stmieva a nasledujúce miestnosti majú otvorené okná,
+                preto sa rolety nezatiahli: {{ open_windows | join(", ") }}
+
+mode: single
