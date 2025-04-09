@@ -28,17 +28,15 @@ blueprint:
 
     notify_user1:
       name: Notifikácia - Používateľ 1 (voliteľné)
-      default: []
+      default: ""
       selector:
-        entity:
-          domain: notify
+        text: {}
 
     notify_user2:
       name: Notifikácia - Používateľ 2 (voliteľné)
-      default: []
+      default: ""
       selector:
-        entity:
-          domain: notify
+        text: {}
 
 trigger:
   - platform: time
@@ -98,11 +96,18 @@ action:
                 - variables:
                     open_windows: "{{ open_windows + [name] }}"
 
-            - alias: "Stmievanie - zatvorenie pri zatvorenom okne"
+            - alias: "Stmievanie - zatvorenie po zavretí okna"
               conditions:
                 - condition: template
-                  value_template: "{{ lux < 600 and window_closed and not after_sunset }}"
+                  value_template: "{{ lux < 600 and not after_sunset and window_open }}"
               sequence:
+                - wait_for_trigger:
+                    - platform: state
+                      entity_id: "{{ window_sensor }}"
+                      to: "off"
+                  timeout:
+                    minutes: 5
+                  continue_on_timeout: false
                 - delay:
                     seconds: 30
                 - service: cover.close_cover
@@ -135,12 +140,26 @@ action:
           - condition: template
             value_template: "{{ open_windows | length > 0 }}"
         sequence:
-          - service: notify.notify
-            data:
-              target: [!input notify_user1, !input notify_user2]
-              title: "Upozornenie: otvorené okná"
-              message: >-
-                Vonku sa stmieva a nasledujúce miestnosti majú otvorené okná,
-                preto sa rolety nezatiahli: {{ open_windows | join(", ") }}
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ !input notify_user1 != '' }}"
+                sequence:
+                  - service: !input notify_user1
+                    data:
+                      title: "Upozornenie: otvorené okná"
+                      message: >-
+                        Vonku sa stmieva a nasledujúce miestnosti majú otvorené okná,
+                        preto sa rolety nezatiahli: {{ open_windows | join(", ") }}
+              - conditions:
+                  - condition: template
+                    value_template: "{{ !input notify_user2 != '' }}"
+                sequence:
+                  - service: !input notify_user2
+                    data:
+                      title: "Upozornenie: otvorené okná"
+                      message: >-
+                        Vonku sa stmieva a nasledujúce miestnosti majú otvorené okná,
+                        preto sa rolety nezatiahli: {{ open_windows | join(", ") }}
 
 mode: single
