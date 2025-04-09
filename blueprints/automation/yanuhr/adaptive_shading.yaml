@@ -137,31 +137,30 @@ action:
                   target:
                     entity_id: "{{ cover }}"
 
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: "{{ open_windows | length > 0 }}"
-        sequence:
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ notify1 != '' }}"
-                sequence:
-                  - service: "{{ notify1 }}"
-                    data:
-                      title: "Upozornenie: otvorené okná"
-                      message: >-
-                        Vonku sa stmieva a nasledujúce miestnosti majú otvorené okná,
-                        preto sa rolety nezatiahli: {{ open_windows | join(", ") }}
-              - conditions:
-                  - condition: template
-                    value_template: "{{ notify2 != '' }}"
-                sequence:
-                  - service: "{{ notify2 }}"
-                    data:
-                      title: "Upozornenie: otvorené okná"
-                      message: >-
-                        Vonku sa stmieva a nasledujúce miestnosti majú otvorené okná,
-                        preto sa rolety nezatiahli: {{ open_windows | join(", ") }}
+  - if:
+      - condition: template
+        value_template: "{{ open_windows | length > 0 }}"
+    then:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ notify1 | length > 0 }}"
+            sequence:
+              - service: "{{ notify1 }}"
+                data:
+                  title: "Upozornenie: otvorené okná"
+                  message: >-
+                    Vonku sa stmieva a nasledujúce miestnosti majú otvorené okná,
+                    preto sa rolety nezatiahli: {{ open_windows | join(', ') }}
+          - conditions:
+              - condition: template
+                value_template: "{{ notify2 | length > 0 }}"
+            sequence:
+              - service: "{{ notify2 }}"
+                data:
+                  title: "Upozornenie: otvorené okná"
+                  message: >-
+                    Vonku sa stmieva a nasledujúce miestnosti majú otvorené okná,
+                    preto sa rolety nezatiahli: {{ open_windows | join(', ') }}
 
 mode: single
