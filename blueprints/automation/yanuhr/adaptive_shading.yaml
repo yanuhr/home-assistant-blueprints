@@ -48,6 +48,10 @@ trigger:
     for:
       minutes: 5
 
+  - platform: sun
+    event: sunset
+    offset: "-00:30:00"
+
   - platform: numeric_state
     entity_id: !input lux_sensor
     above: 800
@@ -90,13 +94,34 @@ action:
                   target:
                     entity_id: "{{ cover }}"
 
-            - alias: "Stmievanie - zhromaždiť otvorené okná"
+            - alias: "Stmievanie - notifikácia pre otvorené okno"
               conditions:
                 - condition: template
                   value_template: "{{ window_sensor != '' and lux < 600 and window_open and not after_sunset }}"
               sequence:
                 - variables:
                     open_windows: "{{ open_windows + [name] }}"
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ notify1 | length > 0 }}"
+                      sequence:
+                        - service: "{{ notify1 }}"
+                          data:
+                            title: "Upozornenie: otvorené okno"
+                            message: >-
+                              Rolety v miestnosti {{ name }} sa nezatiahnu, pretože je otvorené okno.
+                              Po jeho zatvorení sa roleta automaticky zatiahne o 30 sekúnd.
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ notify2 | length > 0 }}"
+                      sequence:
+                        - service: "{{ notify2 }}"
+                          data:
+                            title: "Upozornenie: otvorené okno"
+                            message: >-
+                              Rolety v miestnosti {{ name }} sa nezatiahnu, pretože je otvorené okno.
+                              Po jeho zatvorení sa roleta automaticky zatiahne o 30 sekúnd.
 
             - alias: "Stmievanie - zatvorenie po zavretí okna"
               conditions:
@@ -123,13 +148,10 @@ action:
                   target:
                     entity_id: "{{ cover }}"
 
-            - alias: "Zatvorenie pred západom slnka"
+            - alias: "Zatvorenie po západe slnka"
               conditions:
-                - condition: sun
-                  before: sunset
-                  before_offset: "-00:30:00"
                 - condition: template
-                  value_template: "{{ window_sensor == '' or window_closed }}"
+                  value_template: "{{ after_sunset and (window_sensor == '' or window_closed) }}"
               sequence:
                 - service: cover.close_cover
                   target:
