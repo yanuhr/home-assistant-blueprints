@@ -67,6 +67,8 @@ action:
       rooms: !input cover_configs
       open_windows: []
       after_sunset: "{{ state_attr('sun.sun', 'elevation') | float(1) < 0 }}"
+      notify1: !input notify_user1
+      notify2: !input notify_user2
 
   - repeat:
       for_each: "{{ rooms }}"
@@ -143,9 +145,9 @@ action:
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ !input notify_user1 != '' }}"
+                    value_template: "{{ notify1 != '' }}"
                 sequence:
-                  - service: !input notify_user1
+                  - service: "{{ notify1 }}"
                     data:
                       title: "Upozornenie: otvorené okná"
                       message: >-
@@ -153,9 +155,9 @@ action:
                         preto sa rolety nezatiahli: {{ open_windows | join(", ") }}
               - conditions:
                   - condition: template
-                    value_template: "{{ !input notify_user2 != '' }}"
+                    value_template: "{{ notify2 != '' }}"
                 sequence:
-                  - service: !input notify_user2
+                  - service: "{{ notify2 }}"
                     data:
                       title: "Upozornenie: otvorené okná"
                       message: >-
