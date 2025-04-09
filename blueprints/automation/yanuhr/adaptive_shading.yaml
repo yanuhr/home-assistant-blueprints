@@ -64,7 +64,8 @@ condition:
 
 action:
   - variables:
-      lux: "{{ states(!input lux_sensor) | float(0) }}"
+      lux_sensor_id: !input lux_sensor
+      lux: "{{ states(lux_sensor_id) | float(0) }}"
       rooms: !input cover_configs
       open_windows: []
       after_sunset: "{{ state_attr('sun.sun', 'elevation') | float(1) < 0 }}"
