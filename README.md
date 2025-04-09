@@ -15,7 +15,7 @@ Zohľadňuje:
 
 1. Otvorte **Home Assistant → Nastavenia → Automations & Scenes → Blueprints**
 2. Kliknite **Import Blueprint**
-3. Vložte URL: https://raw.githubusercontent.com/<yourusername>/home-assistant-blueprints/main/blueprints/automation/<yourusername>/adaptive_shading.yaml
+3. Vložte URL: https://raw.githubusercontent.com/'<yourusername>'/home-assistant-blueprints/main/blueprints/automation/'<yourusername>'/adaptive_shading.yaml
 4. Nahradiť `<yourusername>` vaším GitHub používateľským menom.
 
 ## ⚙️ Konfigurácia
