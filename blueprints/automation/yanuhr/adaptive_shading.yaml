@@ -22,7 +22,7 @@ blueprint:
     cover_configs:
       name: Miestnosti a zariadenia
       description: >
-        Zoznam miestností. Každá položka musí obsahovať názov, senzor okna a roletu.
+        Zoznam miestností. Každá položka musí obsahovať názov a roletu. Senzor okna je voliteľný.
       selector:
         object: {}
 
@@ -75,10 +75,10 @@ action:
       sequence:
         - variables:
             name: "{{ repeat.item.name }}"
-            window_sensor: "{{ repeat.item.window_sensor }}"
+            window_sensor: "{{ repeat.item.window_sensor | default('') }}"
             cover: "{{ repeat.item.cover }}"
-            window_open: "{{ is_state(repeat.item.window_sensor, 'on') }}"
-            window_closed: "{{ is_state(repeat.item.window_sensor, 'off') }}"
+            window_open: "{{ window_sensor != '' and is_state(window_sensor, 'on') }}"
+            window_closed: "{{ window_sensor != '' and is_state(window_sensor, 'off') }}"
 
         - choose:
             - alias: "Ráno otvorenie"
@@ -93,7 +93,7 @@ action:
             - alias: "Stmievanie - zhromaždiť otvorené okná"
               conditions:
                 - condition: template
-                  value_template: "{{ lux < 600 and window_open and not after_sunset }}"
+                  value_template: "{{ window_sensor != '' and lux < 600 and window_open and not after_sunset }}"
               sequence:
                 - variables:
                     open_windows: "{{ open_windows + [name] }}"
@@ -101,11 +101,11 @@ action:
             - alias: "Stmievanie - zatvorenie po zavretí okna"
               conditions:
                 - condition: template
-                  value_template: "{{ lux < 600 and not after_sunset and window_open }}"
+                  value_template: "{{ window_sensor != '' and lux < 600 and not after_sunset and window_open }}"
               sequence:
                 - wait_for_trigger:
                     - platform: state
-                      entity_id: !template "{{ repeat.item.window_sensor }}"
+                      entity_id: !template "{{ window_sensor }}"
                       to: "off"
                   timeout:
                     minutes: 5
@@ -131,7 +131,7 @@ action:
                   before: sunset
                   before_offset: "-00:30:00"
                 - condition: template
-                  value_template: "{{ window_closed }}"
+                  value_template: "{{ window_sensor == '' or window_closed }}"
               sequence:
                 - service: cover.close_cover
                   target:
