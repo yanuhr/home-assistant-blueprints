@@ -103,10 +103,8 @@ action:
                 - condition: template
                   value_template: "{{ window_sensor != '' and lux < 600 and not after_sunset and window_open }}"
               sequence:
-                - wait_for_trigger:
-                    - platform: state
-                      entity_id: "{{ repeat.item.window_sensor }}"
-                      to: "off"
+                - wait_template: >
+                    {{ is_state(window_sensor, 'off') }}
                   timeout:
                     minutes: 5
                   continue_on_timeout: false
