@@ -1,113 +1,86 @@
 blueprint:
-  name: Kompletné sledovanie batérií s prehľadom nových entít
-  description: Sleduje stav batérií, upozorňuje na nízke hodnoty a umožňuje prehľadávať nové senzory.
+  name: Sledovanie batérií s denným upozornením a pamäťou
+  description: Sleduje batériové entity, upozorňuje pri poklese pod 15 % a posiela denné pripomienky, kým sa batéria nezvýši.
   domain: automation
   input:
     check_time:
-      name: Čas kontroly
-      description: Kedy sa má vykonať denná kontrola stavu batérií
+      name: Čas upozornenia
+      description: Kedy sa má denne kontrolovať stav batérií
       default: "08:00:00"
       selector:
         time: {}
-    refresh_trigger:
-      name: Prepínač pre prehľadanie nových entít
-      description: input_boolean, ktorý aktivuje hľadanie nových batériových entít
-      selector:
-        entity:
-          domain: input_boolean
-    extra_batteries:
-      name: Manuálne pridané batérie
-      description: Entity, ktoré nemajú 'battery' v ID, ale chceš ich sledovať
-      default: []
+    monitored_batteries:
+      name: Sledované batérie
+      description: Vyber entity, ktoré chceš sledovať
       selector:
         entity:
           domain: sensor
           multiple: true
-    excluded_batteries:
-      name: Vylúčené batérie
-      description: Entity, ktoré nechceš sledovať ani byť upozornený
-      default: []
+    memory_helper:
+      name: Pamäť upozornení
+      description: input_text pomocník na uchovanie entít, ktoré majú aktívne upozornenie
       selector:
         entity:
-          domain: sensor
-          multiple: true
+          domain: input_text
     notification_service:
       name: Notifikačná služba
-      description: Napr. notify.mobile_app_iphone alebo notify.telegram_user
+      description: Napr. notify.mobile_app_iphone alebo notify.telegram
       default: notify.persistent_notification
       selector:
         text: {}
 
-mode: queued
+mode: single
 
 trigger:
   - platform: time
     at: !input check_time
-  - platform: state
-    entity_id: !input refresh_trigger
-    to: "on"
 
 variables:
   notify_service: !input notification_service
-  extra_batteries: !input extra_batteries
-  excluded_batteries: !input excluded_batteries
+  monitored_batteries: !input monitored_batteries
+  memory_helper: !input memory_helper
   low_threshold: 15
 
-  auto_found_batteries: >-
-    {% set result = namespace(items=[]) %}
-    {% for entity in states.sensor %}
-      {% if ('battery' in entity.entity_id or 'bateria' in entity.entity_id)
-            and (entity.state | float(default=-1) >= 0)
-            and (entity.state | float(default=101) <= 100) %}
-        {% set result.items = result.items + [entity.entity_id] %}
-      {% endif %}
-    {% endfor %}
-    {{ result.items }}
-
-  known_entities: "{{ (extra_batteries + excluded_batteries) | unique }}"
-  new_entities: "{{ auto_found_batteries | reject('in', known_entities) | list }}"
-  all_monitored_batteries: "{{ (auto_found_batteries + extra_batteries) | reject('in', excluded_batteries) | unique }}"
-
 action:
-  - choose:
-      # Ak bol aktivovaný refresh prepínač
-      - conditions: "{{ trigger.entity_id == refresh_trigger }}"
-        sequence:
-          - choose:
-              - conditions: "{{ new_entities | length > 0 }}"
-                sequence:
-                  - service: persistent_notification.create
-                    data:
-                      title: "🔋 Nové batériové entity zistené"
-                      message: >
-                        Boli zistené nové senzory batérie, ktoré zatiaľ nesleduješ ani nevylučuješ:
-
-                        {{ new_entities | join('\n') }}
-
-                        Otvor túto automatizáciu a pridaj ich buď do:
-                        - extra_batteries → sledovať
-                        - alebo excluded_batteries → ignorovať
-          - service: input_boolean.turn_off
-            target:
-              entity_id: !input refresh_trigger
-
-      # Inak, ide o plánovanú dennú kontrolu batérií
-      - conditions: "{{ trigger.platform == 'time' }}"
-        sequence:
-          - repeat:
-              for_each: "{{ all_monitored_batteries }}"
+  - variables:
+      notified_entities: >-
+        {% set raw = states(memor‌y_helper) %}
+        {% if raw and raw != 'unknown' %}
+          {{ raw | from_json }}
+        {% else %}
+          []
+        {% endif %}
+  - repeat:
+      for_each: "{{ monitored_batteries }}"
+      sequence:
+        - variables:
+            battery_entity: "{{ repeat.item }}"
+            battery_level: "{{ states(battery_entity) | float(default=100) }}"
+        - choose:
+            # RESET: Batéria stúpla nad 15 % → odstrániť zo zoznamu
+            - conditions:
+                - condition: template
+                  value_template: "{{ battery_level >= low_threshold and battery_entity in notified_entities }}"
               sequence:
-                - variables:
-                    battery_entity: "{{ repeat.item }}"
-                    battery_level: "{{ states(battery_entity) | float(default=100) }}"
-                - choose:
-                    - conditions:
-                        - condition: template
-                          value_template: "{{ battery_level < low_threshold }}"
-                      sequence:
-                        - service: "{{ notify_service }}"
-                          data:
-                            title: "Upozornenie na batériu"
-                            message: >
-                              🔋 Nízka batéria: {{ state_attr(battery_entity, 'friendly_name') or battery_entity }}
-                              má iba {{ battery_level | int }} %!
+                - service: input_text.set_value
+                  data:
+                    entity_id: !input memory_helper
+                    value: >-
+                      {{ (notified_entities | reject('equalto', battery_entity) | list) | to_json }}
+
+            # NOTIFIKÁCIA: Batéria pod 15 %, prvýkrát alebo ďalší deň
+            - conditions:
+                - condition: template
+                  value_template: "{{ battery_level < low_threshold }}"
+              sequence:
+                - service: "{{ notify_service }}"
+                  data:
+                    title: "🔋 Nízka batéria"
+                    message: >
+                      Senzor {{ state_attr(battery_entity, 'friendly_name') or battery_entity }}
+                      má iba {{ battery_level | int }} % batérie.
+                - service: input_text.set_value
+                  data:
+                    entity_id: !input memory_helper
+                    value: >-
+                      {{ (notified_entities + [battery_entity]) | unique | to_json }}
