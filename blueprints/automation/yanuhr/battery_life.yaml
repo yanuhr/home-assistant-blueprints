@@ -18,6 +18,7 @@ blueprint:
     extra_batteries:
       name: Manuálne pridané batérie
       description: Entity, ktoré nemajú 'battery' v ID, ale chceš ich sledovať
+      default: []
       selector:
         entity:
           domain: sensor
@@ -25,6 +26,7 @@ blueprint:
     excluded_batteries:
       name: Vylúčené batérie
       description: Entity, ktoré nechceš sledovať ani byť upozornený
+      default: []
       selector:
         entity:
           domain: sensor
