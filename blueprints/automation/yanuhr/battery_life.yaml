@@ -11,10 +11,11 @@ blueprint:
           domain: sensor
           multiple: true
     notification_service:
-      name: Notifikačná služba
-      description: Vyber službu, ktorou sa má poslať upozornenie
+      name: Názov notifikačnej služby
+      description: Napr. notify.mobile_app_tvojmobil alebo notify.telegram_user
+      default: notify.persistent_notification
       selector:
-        service: {}
+        text: {}
     check_time:
       name: Čas kontroly
       description: Kedy sa má vykonať kontrola stavu batérií
