@@ -45,10 +45,10 @@ action:
   - variables:
       notified_entities: >-
         {% set raw = states(memory_helper) %}
-        {% if raw and raw != 'unknown' %}
+        {% if raw is string and raw != 'unknown' and raw | length > 0 %}
           {{ raw | from_json }}
         {% else %}
-          []
+          [] 
         {% endif %}
   - repeat:
       for_each: "{{ monitored_batteries }}"
