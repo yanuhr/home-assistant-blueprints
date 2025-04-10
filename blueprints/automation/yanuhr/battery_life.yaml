@@ -100,13 +100,14 @@ action:
                 - variables:
                     battery_entity: "{{ repeat.item }}"
                     battery_level: "{{ states(battery_entity) | float(default=100) }}"
-                - if:
-                    - condition: template
-                      value_template: "{{ battery_level < low_threshold }}"
-                  then:
-                    - service: "{{ notify_service }}"
-                      data:
-                        title: "Upozornenie na batériu"
-                        message: >
-                          🔋 Nízka batéria: {{ state_attr(battery_entity, 'friendly_name') or battery_entity }}
-                          má iba {{ battery_level | int }} %!
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ battery_level < low_threshold }}"
+                      sequence:
+                        - service: "{{ notify_service }}"
+                          data:
+                            title: "Upozornenie na batériu"
+                            message: >
+                              🔋 Nízka batéria: {{ state_attr(battery_entity, 'friendly_name') or battery_entity }}
+                              má iba {{ battery_level | int }} %!
