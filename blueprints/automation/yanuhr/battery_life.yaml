@@ -101,9 +101,8 @@ action:
                     battery_entity: "{{ repeat.item }}"
                     battery_level: "{{ states(battery_entity) | float(default=100) }}"
                 - if:
-                    - condition: numeric_state
-                      entity_id: "{{ battery_entity }}"
-                      below: "{{ low_threshold }}"
+                    - condition: template
+                      value_template: "{{ battery_level < low_threshold }}"
                   then:
                     - service: "{{ notify_service }}"
                       data:
