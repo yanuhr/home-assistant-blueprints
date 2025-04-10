@@ -1,0 +1,56 @@
+blueprint:
+  name: Sledovanie batérií s denným upozornením
+  description: Odosiela notifikáciu, ak batéria klesne pod 15 % a pripomína denne.
+  domain: automation
+  input:
+    monitored_batteries:
+      name: Sledované batérie
+      description: Vyber entity, ktoré predstavujú úroveň batérie (%)
+      selector:
+        entity:
+          domain: sensor
+          multiple: true
+    notification_service:
+      name: Notifikačná služba
+      description: Vyber službu, ktorou sa má poslať upozornenie
+      selector:
+        service: {}
+    check_time:
+      name: Čas kontroly
+      description: Kedy sa má vykonať kontrola stavu batérií
+      default: "08:00:00"
+      selector:
+        time: {}
+
+mode: parallel
+max_exceeded: silent
+
+variables:
+  batteries: !input monitored_batteries
+  notify_service: !input notification_service
+  low_threshold: 15
+
+trigger:
+  - platform: time
+    at: !input check_time
+
+condition: []
+
+action:
+  - repeat:
+      for_each: "{{ batteries }}"
+      sequence:
+        - variables:
+            battery_entity: "{{ repeat.item }}"
+            battery_level: "{{ states(battery_entity) | float(default=100) }}"
+        - if:
+            - condition: numeric_state
+              entity_id: "{{ battery_entity }}"
+              below: "{{ low_threshold }}"
+          then:
+            - service: "{{ notify_service }}"
+              data:
+                message: >
+                  🔋 Nízka batéria: {{ state_attr(battery_entity, 'friendly_name') or battery_entity }}
+                  má iba {{ battery_level | int }} %!
+                title: "Upozornenie na batériu"
