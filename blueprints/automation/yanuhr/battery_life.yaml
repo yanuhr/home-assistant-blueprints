@@ -44,7 +44,7 @@ variables:
 action:
   - variables:
       notified_entities: >-
-        {% set raw = states(memor‌y_helper) %}
+        {% set raw = states(memory_helper) %}
         {% if raw and raw != 'unknown' %}
           {{ raw | from_json }}
         {% else %}
@@ -68,7 +68,7 @@ action:
                     value: >-
                       {{ (notified_entities | reject('equalto', battery_entity) | list) | to_json }}
 
-            # NOTIFIKÁCIA: Batéria pod 15 %, prvýkrát alebo ďalší deň
+            # NOTIFIKÁCIA: Batéria pod 15 % – pošli každý deň, kým sa nezvýši
             - conditions:
                 - condition: template
                   value_template: "{{ battery_level < low_threshold }}"
