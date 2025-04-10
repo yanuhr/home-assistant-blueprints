@@ -11,7 +11,7 @@ blueprint:
         time: {}
     refresh_trigger:
       name: Prepínač pre prehľadanie nových entít
-      description: input boolean, ktorý aktivuje hľadanie nových batériových entít
+      description: input_boolean, ktorý aktivuje hľadanie nových batériových entít
       selector:
         entity:
           domain: input_boolean
@@ -83,8 +83,8 @@ action:
                         {{ new_entities | join('\n') }}
 
                         Otvor túto automatizáciu a pridaj ich buď do:
-                        - `extra_batteries` → sledovať
-                        - alebo `excluded_batteries` → ignorovať
+                        - extra_batteries → sledovať
+                        - alebo excluded_batteries → ignorovať
           - service: input_boolean.turn_off
             target:
               entity_id: !input refresh_trigger
