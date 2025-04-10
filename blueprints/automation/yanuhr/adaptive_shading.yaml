@@ -128,17 +128,6 @@ action:
                 - condition: template
                   value_template: "{{ window_sensor != '' and lux < 600 and not after_sunset and window_open }}"
               sequence:
-    - alias: "Stmievanie - okamžité zatvorenie pri zavretom okne"
-      conditions:
-        - condition: template
-          value_template: "{{ window_sensor != '' and lux < 600 and not after_sunset and window_closed }}"
-      sequence:
-        - delay:
-            seconds: 2
-        - service: cover.close_cover
-          target:
-            entity_id: "{{ cover }}"
-
                 - wait_template: >
                     {{ is_state(window_sensor, 'off') }}
                   timeout:
@@ -146,6 +135,17 @@ action:
                   continue_on_timeout: false
                 - delay:
                     seconds: 30
+                - service: cover.close_cover
+                  target:
+                    entity_id: "{{ cover }}"
+
+            - alias: "Stmievanie - okamžité zatvorenie pri zavretom okne"
+              conditions:
+                - condition: template
+                  value_template: "{{ window_sensor != '' and trigger.platform in ['numeric_state', 'sun'] and lux < 600 and not after_sunset and window_closed }}"
+              sequence:
+                - delay:
+                    seconds: 2
                 - service: cover.close_cover
                   target:
                     entity_id: "{{ cover }}"
