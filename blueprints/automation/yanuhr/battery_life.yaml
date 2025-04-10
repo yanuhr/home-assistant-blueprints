@@ -11,7 +11,7 @@ blueprint:
         time: {}
     refresh_trigger:
       name: Prepínač pre prehľadanie nových entít
-      description: `input_boolean`, ktorý aktivuje hľadanie nových batériových entít
+      description: input_boolean, ktorý aktivuje hľadanie nových batériových entít
       selector:
         entity:
           domain: input_boolean
