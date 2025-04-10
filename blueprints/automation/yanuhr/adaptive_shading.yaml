@@ -142,7 +142,7 @@ action:
             - alias: "Stmievanie - okamžité zatvorenie pri zavretom okne"
               conditions:
                 - condition: template
-                  value_template: "{{ window_sensor != '' and lux < 600 and not after_sunset and window_closed and trigger.platform == 'numeric_state' }}"
+                  value_template: "{{ window_sensor != '' and lux < 600 and not after_sunset and window_closed }}"
               sequence:
                 - delay:
                     seconds: 2
