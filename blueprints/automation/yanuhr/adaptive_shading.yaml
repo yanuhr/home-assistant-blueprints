@@ -88,7 +88,10 @@ action:
             - alias: "Ráno otvorenie"
               conditions:
                 - condition: template
-                  value_template: "{{ trigger.platform == 'time' and lux > 800 and not after_sunset }}"
+                  value_template: > 
+                    {{ now().strftime('%H:%M') == morning_trigger_time and
+                       states(lux_sensor_id) | float(0) > 800 and
+                       (state_attr('sun.sun', 'elevation') | float(1) < 0) == false }}
               sequence:
                 - service: cover.open_cover
                   target:
