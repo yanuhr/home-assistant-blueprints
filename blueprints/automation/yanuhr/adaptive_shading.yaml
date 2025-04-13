@@ -169,7 +169,7 @@ action:
               conditions:
                 - condition: template
                   value_template: >
-                {{ after_sunset and (window_sensor is not defined or is_state(window_sensor, 'off')) }}
+                  {{ after_sunset and (window_sensor is not defined or is_state(window_sensor, 'off')) }}
               sequence:
                 - service: cover.close_cover
                   target:
