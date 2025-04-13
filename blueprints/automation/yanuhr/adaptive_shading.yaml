@@ -146,7 +146,7 @@ action:
               conditions:
                 - condition: template
                   value_template: >
-                    {{ (window_sensor is not defined or window_sensor == '' or is_state(window_sensor, 'off')) and
+                    {{ ((window_sensor | default('')) == '' or window_sensor == '' or is_state(window_sensor, 'off')) and
                        states(lux_sensor_id) | float(0) < 600 and
                        (state_attr('sun.sun', 'elevation') | float(1) < 0) == false }}
               sequence:
