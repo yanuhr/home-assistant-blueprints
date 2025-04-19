@@ -102,8 +102,27 @@ action:
                 - condition: template
                   value_template: "{{ window_sensor != '' and lux < 600 and window_open and not after_sunset }}"
               sequence:
-                - variables:
-                    open_windows: "{{ open_windows + [name] }}"
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ notify1 | length > 0 }}"
+                      sequence:
+                        - service: "{{ notify1 }}"
+                          data:
+                            title: "Upozornenie: otvorené okno"
+                            message: >-
+                              Rolety v miestnosti {{ name }} sa nezatiahnu, pretože je otvorené okno.
+                              Po jeho zatvorení sa roleta automaticky zatiahne o 30 sekúnd.
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ notify2 | length > 0 }}"
+                      sequence:
+                        - service: "{{ notify2 }}"
+                          data:
+                            title: "Upozornenie: otvorené okno"
+                            message: >-
+                              Rolety v miestnosti {{ name }} sa nezatiahnu, pretože je otvorené okno.
+                              Po jeho zatvorení sa roleta automaticky zatiahne o 30 sekúnd."
                 - choose:
                     - conditions:
                         - condition: template
