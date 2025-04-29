@@ -1,0 +1,60 @@
+blueprint:
+  name: Monitorovanie okien
+  description: >
+    Automatické sledovanie stavu okien a odosielanie notifikácií pri ich otvorení alebo zatvorení.
+    Podporuje viacero okien a notifikačných služieb.
+
+  domain: automation
+  input:
+    window_sensors:
+      name: Senzory okien
+      description: Vyberte senzory okien, ktoré chcete monitorovať
+      selector:
+        target:
+          entity:
+            domain: binary_sensor
+            device_class: window
+
+    notification_services:
+      name: Notifikačné služby
+      description: >
+        Zadajte názvy notifikačných služieb (napr. notify.mobile_app_iphone_jan).
+        Môžete zadať viacero služieb, každú na nový riadok.
+      default: []
+      selector:
+        text:
+          multiple: true
+
+trigger:
+  - platform: state
+    entity_id: !input window_sensors
+    from: "off"
+    to: "on"
+
+  - platform: state
+    entity_id: !input window_sensors
+    from: "on"
+    to: "off"
+
+condition: []
+
+action:
+  - variables:
+      window_sensors: !input window_sensors
+      notification_services: !input notification_services
+      window_name: "{{ state_attr(trigger.entity_id, 'friendly_name') | default(trigger.entity_id) }}"
+      window_state: "{{ 'Otvorené' if trigger.to_state.state == 'on' else 'Zatvorené' }}"
+
+  - if:
+      - condition: template
+        value_template: "{{ notification_services | length > 0 }}"
+    then:
+      - repeat:
+          for_each: "{{ notification_services }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              data:
+                title: "Stav okna"
+                message: "{{ window_name }}: {{ window_state }}"
+
+mode: single
