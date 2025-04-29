@@ -73,6 +73,7 @@ action:
       open_windows: []
       after_sunset: "{{ state_attr('sun.sun', 'elevation') | float(1) < 0 }}"
       notification_services: !input notification_services
+      morning_trigger_time: !input morning_trigger_time
       is_morning: "{{ now().strftime('%H:%M:%S') >= morning_trigger_time }}"
       is_bright: "{{ lux > 800 }}"
       is_dark: "{{ lux < 600 }}"
