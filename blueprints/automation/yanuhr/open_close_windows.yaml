@@ -27,12 +27,12 @@ blueprint:
 
 trigger:
   - platform: state
-    entity_id: !input window_sensors.entity_id
+    entity_id: !input window_sensors
     from: "off"
     to: "on"
 
   - platform: state
-    entity_id: !input window_sensors.entity_id
+    entity_id: !input window_sensors
     from: "on"
     to: "off"
 
