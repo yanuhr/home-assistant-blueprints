@@ -57,7 +57,7 @@ action:
       recovered_batteries: []
 
   - repeat:
-      for_each: "{{ battery_sensors }}"
+      for_each: "{{ battery_sensors.entity_id }}"
       sequence:
         - variables:
             battery_level: "{{ states(repeat.item) | float(100) }}"
