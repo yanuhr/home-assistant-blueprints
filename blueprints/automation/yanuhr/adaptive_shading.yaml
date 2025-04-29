@@ -23,12 +23,13 @@ blueprint:
 
     notification_services:
       name: Notifikačné služby
-      description: Vyberte služby, ktoré budú používané pre notifikácie
+      description: >
+        Zadajte názvy notifikačných služieb (napr. notify.mobile_app_iphone_jan).
+        Môžete zadať viacero služieb, každú na nový riadok.
       default: []
       selector:
-        target:
-          entity:
-            domain: notify
+        text:
+          multiple: true
 
     room_config:
       name: Konfigurácia miestností
