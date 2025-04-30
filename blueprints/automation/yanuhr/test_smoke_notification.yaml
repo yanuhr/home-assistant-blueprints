@@ -1,22 +1,18 @@
 blueprint:
   name: Testovanie hlásení detektorov dymu
   description: >
-    Testovacia automatizácia, ktorá simuluje hlásenie zadymenia pre konkrétnu miestnosť.
+    Testovacia automatizácia, ktorá simuluje hlásenie zadymenia pre konkrétny detektor.
     Odosiela notifikácie a hlasové hlásenie bez aktivácie reálnych senzorov alebo hlavných automatizácií.
 
   domain: automation
   input:
-    test_room:
-      name: Miestnosť na test
-      description: Vyberte miestnosť, pre ktorú chcete otestovať hlásenie
+    test_sensor:
+      name: Detektor na test
+      description: Vyberte konkrétny detektor dymu, ktorý chcete otestovať
       selector:
-        select:
-          options:
-            - Kuchyňa
-            - Spálňa
-            - Obývačka
-            - Hala
-            - Kúpeľňa
+        entity:
+          domain: binary_sensor
+          device_class: smoke
 
     notification_services:
       name: Mobilné notifikačné služby
@@ -44,20 +40,24 @@ trigger:
   - platform: event
     event_type: test_smoke_alert
     event_data:
-      room: !input test_room
+      entity_id: !input test_sensor
 
 condition: []
 
 action:
   - variables:
-      room: !input test_room
+      sensor_entity: !input test_sensor
       notification_services: !input notification_services
       tts_players: !input tts_players
       has_notifications: "{{ (notification_services | default([])) | length > 0 }}"
       has_tts: "{{ (tts_players | default([])) | length > 0 }}"
       test_type: "{{ trigger.event.data.type | default('start') }}"
-      test_message: "🧪 Test: Simulované zadymenie v miestnosti {{ room }}"
-      tts_message: "Toto je testovacia hláška. Simulované zadymenie v miestnosti {{ room }}."
+      sensor_name: "{{ state_attr(sensor_entity, 'friendly_name') }}"
+      room_name: >
+        {% set area = area_name(sensor_entity) %}
+        {{ area if area else sensor_name }}
+      test_message: "🧪 Test: Simulované zadymenie v miestnosti {{ room_name }}"
+      tts_message: "Toto je testovacia hláška. Simulované zadymenie v miestnosti {{ room_name }}."
       notification_data:
         priority: default
         importance: high
