@@ -1,18 +1,18 @@
 blueprint:
-  name: Upozornenie na výmenu filtra v čističke vzduchu
+  name: Monitorovanie dverí
   description: >
-    Automaticky upozorňuje na potrebu výmeny filtra v čističke vzduchu.
-    Podporuje viacero senzorov a notifikačných služieb.
+    Automatické sledovanie stavu dverí a odosielanie notifikácií pri ich otvorení alebo zatvorení.
+    Podporuje viacero dverí a notifikačných služieb.
 
   domain: automation
   input:
-    filter_sensors:
-      name: Senzory filtra
-      description: Vyberte senzory filtra, ktoré chcete monitorovať
+    door_sensors:
+      name: Senzory dverí
+      description: Vyberte senzory dverí, ktoré chcete monitorovať
       selector:
         entity:
           domain: binary_sensor
-          device_class: problem
+          device_class: door
           multiple: true
 
     notification_services:
@@ -25,96 +25,52 @@ blueprint:
         text:
           multiple: true
 
-    notification_time:
-      name: Čas notifikácie
-      description: Kedy sa má notifikácia odosielať (raz denne)
-      default: "08:00:00"
-      selector:
-        time: {}
-
-    memory_helper:
-      name: Memory Helper
-      description: Entita input_text na ukladanie už notifikovaných senzorov
-      selector:
-        entity:
-          domain: input_text
-
 trigger:
   - platform: state
-    entity_id: !input filter_sensors
+    entity_id: !input door_sensors
     from: "off"
     to: "on"
 
-  - platform: time
-    at: !input notification_time
+  - platform: state
+    entity_id: !input door_sensors
+    from: "on"
+    to: "off"
 
-condition:
-  - condition: template
-    value_template: >
-      {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | list %}
-      {{ active_sensors | length > 0 }}
+condition: []
 
 action:
   - variables:
-      filter_sensors: !input filter_sensors
+      door_sensors: !input door_sensors
       notification_services: !input notification_services
-      memory_helper: !input memory_helper
-      already_notified: >
-        {% if states(memory_helper) != '' %}
-          {{ states(memory_helper).split(',') | map('trim') | list }}
+      door_name: >-
+        {% if trigger is defined and trigger.entity_id is defined %}
+          {{ state_attr(trigger.entity_id, 'friendly_name') | default(trigger.entity_id) }}
         {% else %}
-          {{ [] }}
+          Unknown
         {% endif %}
-      triggered_sensors: >
-        {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list %}
-        {{ active_sensors }}
-      new_notifications: >
-        {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list %}
-        {% set not_notified = active_sensors | reject('in', already_notified) | list %}
-        {{ not_notified }}
-      filter_locations: >
-        {% set locations = [] %}
-        {% for sensor in new_notifications %}
-          {% set room = area_name(sensor) | default('Neznáma miestnosť') %}
-          {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
-          {% set locations = locations + [room ~ " – " ~ name] %}
-        {% endfor %}
-        {{ locations | list }}
+      door_location: >-
+        {% if trigger is defined and trigger.entity_id is defined %}
+          {{ area_name(trigger.entity_id) | default(door_name) }}
+        {% else %}
+          Unknown
+        {% endif %}
+      door_state: >-
+        {% if trigger is defined and trigger.to_state is defined and trigger.to_state.state is defined %}
+          {{ 'Otvorené' if trigger.to_state.state == 'on' else 'Zatvorené' }}
+        {% else %}
+          Unknown
+        {% endif %}
 
   - if:
       - condition: template
-        value_template: "{{ notification_services | length > 0 and new_notifications | length > 0 }}"
+        value_template: "{{ notification_services | length > 0 }}"
     then:
       - repeat:
           for_each: "{{ notification_services }}"
           sequence:
             - service: "{{ repeat.item }}"
               data:
-                title: "Výmena filtra čističky vzduchu"
-                message: >
-                  {% if filter_locations | length == 1 %}
-                    {{ filter_locations[0] }}: Vymeň filter v čističke vzduchu!
-                  {% else %}
-                    Vymeň filter v týchto čističkách: {{ filter_locations | join(', ') }}
-                  {% endif %}
+                title: "Stav dverí"
+                message: "{{ door_location }}: {{ door_state }}"
 
-      - service: input_text.set_value
-        data:
-          entity_id: "{{ memory_helper }}"
-          value: >
-            {% set updated_list = already_notified + new_notifications %}
-            {{ updated_list | unique | join(',') }}
-
-  - if:
-      - condition: template
-        value_template: "{{ trigger is defined and trigger.platform == 'state' and trigger.to_state.state == 'off' }}"
-    then:
-      - service: input_text.set_value
-        data:
-          entity_id: "{{ memory_helper }}"
-          value: >
-            {% set filtered_list = already_notified | reject('eq', trigger.entity_id) | list %}
-            {{ filtered_list | join(',') }}
-
-mode: queued
-max: 10
+mode: single
