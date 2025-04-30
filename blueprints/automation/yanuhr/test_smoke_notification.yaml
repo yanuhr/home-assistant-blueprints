@@ -51,7 +51,12 @@ action:
       tts_players: !input tts_players
       has_notifications: "{{ (notification_services | default([])) | length > 0 }}"
       has_tts: "{{ (tts_players | default([])) | length > 0 }}"
-      test_type: "{{ trigger.event.data.type | default('start') }}"
+      test_type: >
+        {% if trigger is defined and trigger.event is defined and 'data' in trigger.event %}
+          {{ trigger.event.data.type | default('start') }}
+        {% else %}
+          start
+        {% endif %}
       sensor_name: "{{ state_attr(sensor_entity, 'friendly_name') }}"
       room_name: >
         {% set area = area_name(sensor_entity) %}
