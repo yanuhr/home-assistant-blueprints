@@ -77,10 +77,10 @@ action:
           - condition: template
             value_template: "{{ test_type == 'start' }}"
         sequence:
-          - if:
-              condition: template
-              value_template: "{{ has_notifications }}"
-              then:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ has_notifications }}"
                 sequence:
                   - repeat:
                       for_each: "{{ notification_services }}"
@@ -91,10 +91,10 @@ action:
                             message: "{{ test_message }}"
                             data: "{{ notification_data }}"
 
-          - if:
-              condition: template
-              value_template: "{{ has_tts }}"
-              then:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ has_tts }}"
                 sequence:
                   - repeat:
                       for_each: "{{ tts_players }}"
