@@ -80,30 +80,28 @@ action:
           - if:
               condition: template
               value_template: "{{ has_notifications }}"
-              then:
-                - repeat:
-                    for_each: "{{ notification_services }}"
-                    sequence:
-                      - service: "{{ repeat.item }}"
-                        data:
-                          title: "Testovanie detektora dymu"
-                          message: "{{ test_message }}"
-                          data: "{{ notification_data }}"
+              repeat:
+                for_each: "{{ notification_services }}"
+                sequence:
+                  - service: "{{ repeat.item }}"
+                    data:
+                      title: "Testovanie detektora dymu"
+                      message: "{{ test_message }}"
+                      data: "{{ notification_data }}"
 
           - if:
               condition: template
               value_template: "{{ has_tts }}"
-              then:
-                - repeat:
-                    for_each: "{{ tts_players }}"
-                    sequence:
-                      - service: tts.speak
-                        data:
-                          cache: true
-                          media_player_entity_id: "{{ repeat.item }}"
-                          message: "{{ tts_message }}"
-                          language: sk
-                        target:
-                          entity_id: tts.google_en_com
+              repeat:
+                for_each: "{{ tts_players }}"
+                sequence:
+                  - service: tts.speak
+                    data:
+                      cache: true
+                      media_player_entity_id: "{{ repeat.item }}"
+                      message: "{{ tts_message }}"
+                      language: sk
+                    target:
+                      entity_id: tts.google_en_com
 
 mode: single
