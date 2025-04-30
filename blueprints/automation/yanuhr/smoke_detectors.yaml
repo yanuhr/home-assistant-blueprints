@@ -1,0 +1,220 @@
+blueprint:
+  name: Upozornenie na zadymenie
+  description: >
+    Automatizácia, ktorá odosiela notifikácie pri detekcii dymu a jeho zániku.
+    Voliteľne môže spustiť alarmovú akciu (napr. siréna, scéna) pri zadymení.
+    Vhodné pre viacero Aqara detektorov dymu (napr. JY-GZ-01AQ).
+
+  domain: automation
+  input:
+    smoke_sensors:
+      name: Detektory dymu
+      description: Vyberte senzory dymu, ktoré chcete monitorovať
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: smoke
+          multiple: true
+
+    notification_services:
+      name: Notifikačné služby
+      description: >
+        Zadajte názvy notifikačných služieb (napr. notify.mobile_app_jan).
+        Môžete zadať viacero služieb, každú na nový riadok.
+      default: []
+      selector:
+        text:
+          multiple: true
+
+    alarm_mode:
+      name: Aktivovať alarm
+      description: >
+        Ak je aktivované, spustí sa definovaná alarmová akcia pri zadymení.
+      default: false
+      selector:
+        boolean: {}
+
+    custom_alert_actions:
+      name: Alarmová akcia (voliteľná)
+      description: >
+        Voliteľná akcia, ktorá sa spustí pri zadymení – napríklad skript alebo scéna.
+      default: []
+      selector:
+        entity:
+          domain: [script, scene]
+          multiple: true
+
+    repeat_notifications:
+      name: Opakované notifikácie
+      description: >
+        Ak je aktivované, notifikácie sa budú opakovať každých 5 minút, pokiaľ
+        zostáva detekovaný dym.
+      default: false
+      selector:
+        boolean: {}
+
+    tts_players:
+      name: TTS prehrávače (voliteľné)
+      description: >
+        Vyberte zariadenia s podporou TTS pre prehrávanie hlasových hlásení.
+        Podporované sú napríklad:
+        - Home Assistant Voice (media_player.assist_*)
+        - Google Nest/Home (media_player.google_*)
+        - Amazon Echo (media_player.echo_*)
+        Môžete vybrať viacero zariadení, na ktorých sa má hlásenie prehrať.
+      default: []
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+
+    use_room_names:
+      name: Použiť názvy miestností
+      description: >
+        Ak je aktivované, v hláseniach sa použijú názvy miestností namiesto názvov senzorov.
+        Názvy miestností sa získajú z oblasti (area) priradenej k senzoru.
+      default: false
+      selector:
+        boolean: {}
+
+trigger:
+  - platform: state
+    entity_id: !input smoke_sensors
+    from: "off"
+    to: "on"
+
+  - platform: state
+    entity_id: !input smoke_sensors
+    from: "on"
+    to: "off"
+
+  - platform: state
+    entity_id: !input smoke_sensors
+    to: ["unavailable", "unknown"]
+
+  - platform: time_pattern
+    minutes: /5
+    id: repeat_notification
+
+condition:
+  - condition: template
+    value_template: >-
+      {% if trigger.id == 'repeat_notification' %}
+        {{ repeat_notifications and smoke_sensors | select('is_state', 'on') | list | length > 0 }}
+      {% else %}
+        true
+      {% endif %}
+
+action:
+  - variables:
+      sensor_name: >-
+        {% if trigger is defined and trigger.entity_id is defined %}
+          {{ state_attr(trigger.entity_id, 'friendly_name') | default(trigger.entity_id) }}
+        {% else %}
+          Neznámy senzor
+        {% endif %}
+      room_name: >-
+        {% if trigger is defined and trigger.entity_id is defined and use_room_names %}
+          {% set area = area_name(trigger.entity_id) %}
+          {{ area if area else sensor_name }}
+        {% else %}
+          {{ sensor_name }}
+        {% endif %}
+      new_state: "{{ trigger.to_state.state }}"
+      notification_services: !input notification_services
+      alarm_mode: !input alarm_mode
+      custom_alert_actions: !input custom_alert_actions
+      repeat_notifications: !input repeat_notifications
+      tts_players: !input tts_players
+      use_room_names: !input use_room_names
+      has_notifications: "{{ notification_services | length > 0 }}"
+      has_alarm_action: "{{ custom_alert_actions | length > 0 }}"
+      has_tts: "{{ tts_players | length > 0 }}"
+
+  - choose:
+      - alias: Zadymenie
+        conditions:
+          - condition: template
+            value_template: "{{ new_state == 'on' }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ has_notifications }}"
+            then:
+              - repeat:
+                  for_each: "{{ notification_services }}"
+                  sequence:
+                    - service: "{{ repeat.item }}"
+                      data:
+                        title: "🚨 Detekovaný dym"
+                        message: "Detektor {{ room_name }} zaznamenal dym!"
+                        data:
+                          priority: high
+                          importance: max
+                          channel: emergency
+          - if:
+              - condition: template
+                value_template: "{{ alarm_mode and has_alarm_action }}"
+            then:
+              - repeat:
+                  for_each: "{{ custom_alert_actions }}"
+                  sequence:
+                    - service: homeassistant.turn_on
+                      target:
+                        entity_id: "{{ repeat.item }}"
+          - if:
+              - condition: template
+                value_template: "{{ has_tts }}"
+            then:
+              - repeat:
+                  for_each: "{{ tts_players }}"
+                  sequence:
+                    - service: tts.google_translate_say
+                      target:
+                        entity_id: "{{ repeat.item }}"
+                      data:
+                        message: "Pozor, bol detegovaný dym v {{ room_name }}"
+                        language: sk
+
+      - alias: Koniec zadymenia
+        conditions:
+          - condition: template
+            value_template: "{{ new_state == 'off' }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ has_notifications }}"
+            then:
+              - repeat:
+                  for_each: "{{ notification_services }}"
+                  sequence:
+                    - service: "{{ repeat.item }}"
+                      data:
+                        title: "ℹ️ Dym zmizol"
+                        message: "Detektor {{ room_name }} už nezaznamenáva dym."
+                        data:
+                          priority: default
+                          importance: high
+
+      - alias: Senzor nie je dostupný
+        conditions:
+          - condition: template
+            value_template: "{{ new_state in ['unavailable', 'unknown'] }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ has_notifications }}"
+            then:
+              - repeat:
+                  for_each: "{{ notification_services }}"
+                  sequence:
+                    - service: "{{ repeat.item }}"
+                      data:
+                        title: "⚠️ Senzor nie je dostupný"
+                        message: "Detektor {{ room_name }} nie je dostupný a môže byť nefunkčný!"
+                        data:
+                          priority: high
+                          importance: high
+                          channel: warning
+
+mode: single
