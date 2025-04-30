@@ -77,55 +77,54 @@ action:
           - condition: template
             value_template: "{{ test_type == 'start' }}"
         sequence:
-          - choose:
-              - alias: Notifikácie
-                conditions:
-                  - condition: template
-                    value_template: "{{ has_notifications }}"
-                sequence:
-                  - repeat:
-                      for_each: "{{ notification_services }}"
-                      sequence:
-                        - service: "{{ repeat.item }}"
-                          data:
-                            title: "Testovanie detektora dymu"
-                            message: "{{ test_message }}"
-                            data: "{{ notification_data }}"
+          - if:
+              conditions:
+                - condition: template
+                  value_template: "{{ has_notifications }}"
+              then:
+                - repeat:
+                    for_each: "{{ notification_services }}"
+                    sequence:
+                      - service: "{{ repeat.item }}"
+                        data:
+                          title: "Testovanie detektora dymu"
+                          message: "{{ test_message }}"
+                          data: "{{ notification_data }}"
 
-              - alias: TTS hlásenie
-                conditions:
-                  - condition: template
-                    value_template: "{{ has_tts }}"
-                sequence:
-                  - repeat:
-                      for_each: "{{ tts_players }}"
-                      sequence:
-                        - choose:
-                            - alias: Voice Assistant
-                              conditions:
-                                - condition: template
-                                  value_template: "{{ repeat.item is string and repeat.item.startswith('media_player.assist_') }}"
-                              sequence:
-                                - service: assist_pipeline.speak
-                                  data:
-                                    media_player_entity: "{{ repeat.item }}"
-                                    start_stage: tts
-                                    end_stage: tts
-                                    pipeline: default
-                                    input: "{{ tts_message }}"
-                            - alias: Iné prehrávače
-                              conditions:
-                                - condition: template
-                                  value_template: "{{ repeat.item is string and not repeat.item.startswith('media_player.assist_') }}"
-                              sequence:
-                                - service: tts.google_translate_say
-                                  target:
-                                    entity_id: "{{ repeat.item }}"
-                                  data:
-                                    message: "{{ tts_message }}"
-                                    language: sk
-                                    options:
-                                      speed: 1.0
-                                      pitch: 1.0
+          - if:
+              conditions:
+                - condition: template
+                  value_template: "{{ has_tts }}"
+              then:
+                - repeat:
+                    for_each: "{{ tts_players }}"
+                    sequence:
+                      - choose:
+                          - alias: Voice Assistant
+                            conditions:
+                              - condition: template
+                                value_template: "{{ repeat.item is string and repeat.item.startswith('media_player.assist_') }}"
+                            sequence:
+                              - service: assist_pipeline.speak
+                                data:
+                                  media_player_entity: "{{ repeat.item }}"
+                                  start_stage: tts
+                                  end_stage: tts
+                                  pipeline: default
+                                  input: "{{ tts_message }}"
+                          - alias: Iné prehrávače
+                            conditions:
+                              - condition: template
+                                value_template: "{{ repeat.item is string and not repeat.item.startswith('media_player.assist_') }}"
+                            sequence:
+                              - service: tts.google_translate_say
+                                target:
+                                  entity_id: "{{ repeat.item }}"
+                                data:
+                                  message: "{{ tts_message }}"
+                                  language: sk
+                                  options:
+                                    speed: 1.0
+                                    pitch: 1.0
 
 mode: single
