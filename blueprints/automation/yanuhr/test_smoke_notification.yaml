@@ -100,14 +100,31 @@ action:
                   - repeat:
                       for_each: "{{ tts_players }}"
                       sequence:
-                        - service: tts.google_translate_say
-                          target:
-                            entity_id: "{{ repeat.item }}"
-                          data:
-                            message: "{{ tts_message }}"
-                            language: sk
-                            options:
-                              speed: 1.0
-                              pitch: 1.0
+                        - choose:
+                            - alias: Voice Assistant
+                              conditions:
+                                - condition: template
+                                  value_template: "{{ repeat.item.startswith('media_player.assist_') }}"
+                              sequence:
+                                - service: assist_pipeline.speak
+                                  data:
+                                    media_player_entity: "{{ repeat.item }}"
+                                    start_stage: intent
+                                    end_stage: tts
+                                    input: "{{ tts_message }}"
+                            - alias: Iné prehrávače
+                              conditions:
+                                - condition: template
+                                  value_template: "{{ not repeat.item.startswith('media_player.assist_') }}"
+                              sequence:
+                                - service: tts.google_translate_say
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    message: "{{ tts_message }}"
+                                    language: sk
+                                    options:
+                                      speed: 1.0
+                                      pitch: 1.0
 
 mode: single
