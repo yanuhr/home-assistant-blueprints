@@ -109,8 +109,9 @@ action:
                                 - service: assist_pipeline.speak
                                   data:
                                     media_player_entity: "{{ repeat.item }}"
-                                    start_stage: intent
+                                    start_stage: tts
                                     end_stage: tts
+                                    pipeline: default
                                     input: "{{ tts_message }}"
                             - alias: Iné prehrávače
                               conditions:
