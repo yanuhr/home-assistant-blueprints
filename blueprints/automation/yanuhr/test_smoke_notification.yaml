@@ -52,8 +52,9 @@ action:
       has_notifications: "{{ (notification_services | default([])) | length > 0 }}"
       has_tts: "{{ (tts_players | default([])) | length > 0 }}"
       test_type: >
-        {% if trigger is defined and trigger.event is defined and 'data' in trigger.event %}
-          {{ trigger.event.data.type | default('start') }}
+        {% set t = trigger if trigger is defined else none %}
+        {% if t is mapping and 'event' in t and 'data' in t.event %}
+          {{ t.event.data.type | default('start') }}
         {% else %}
           start
         {% endif %}
