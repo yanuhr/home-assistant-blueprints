@@ -1,0 +1,107 @@
+blueprint:
+  name: Testovanie hlásení detektorov dymu
+  description: >
+    Testovacia automatizácia, ktorá simuluje hlásenie zadymenia pre konkrétnu miestnosť.
+    Odosiela notifikácie a hlasové hlásenie bez aktivácie reálnych senzorov alebo hlavných automatizácií.
+
+  domain: automation
+  input:
+    test_room:
+      name: Miestnosť na test
+      description: Vyberte miestnosť, pre ktorú chcete otestovať hlásenie
+      selector:
+        select:
+          options:
+            - Kuchyňa
+            - Spálňa
+            - Obývačka
+            - Hala
+            - Kúpeľňa
+
+    notification_services:
+      name: Mobilné notifikačné služby
+      description: >
+        Vyberte notifikačné služby, kam sa pošle testovacia správa (napr. notify.mobile_app_jan).
+      default: []
+      selector:
+        text:
+          multiple: true
+
+    tts_players:
+      name: TTS prehrávače (voliteľné)
+      description: >
+        Vyberte zariadenia, na ktorých sa má prehrať testovacie TTS hlásenie.
+        Podporované sú napríklad:
+        - Home Assistant Voice (media_player.assist_*)
+        - Google Nest/Home
+      default: []
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+
+trigger:
+  - platform: event
+    event_type: test_smoke_alert
+    event_data:
+      room: !input test_room
+
+condition: []
+
+action:
+  - variables:
+      room: !input test_room
+      notification_services: !input notification_services
+      tts_players: !input tts_players
+      has_notifications: "{{ (notification_services | default([])) | length > 0 }}"
+      has_tts: "{{ (tts_players | default([])) | length > 0 }}"
+      test_type: "{{ trigger.event.data.type | default('start') }}"
+      test_message: "🧪 Test: Simulované zadymenie v miestnosti {{ room }}"
+      tts_message: "Toto je testovacia hláška. Simulované zadymenie v miestnosti {{ room }}."
+      notification_data:
+        priority: default
+        importance: high
+        channel: test
+        tag: test_smoke_alert
+        group: test_alerts
+
+  - choose:
+      - alias: Spracovanie testu
+        conditions:
+          - condition: template
+            value_template: "{{ test_type == 'start' }}"
+        sequence:
+          - choose:
+              - alias: Notifikácie
+                conditions:
+                  - condition: template
+                    value_template: "{{ has_notifications }}"
+                sequence:
+                  - repeat:
+                      for_each: "{{ notification_services }}"
+                      sequence:
+                        - service: "{{ repeat.item }}"
+                          data:
+                            title: "Testovanie detektora dymu"
+                            message: "{{ test_message }}"
+                            data: "{{ notification_data }}"
+
+              - alias: TTS hlásenie
+                conditions:
+                  - condition: template
+                    value_template: "{{ has_tts }}"
+                sequence:
+                  - repeat:
+                      for_each: "{{ tts_players }}"
+                      sequence:
+                        - service: tts.google_translate_say
+                          target:
+                            entity_id: "{{ repeat.item }}"
+                          data:
+                            message: "{{ tts_message }}"
+                            language: sk
+                            options:
+                              speed: 1.0
+                              pitch: 1.0
+
+mode: single
