@@ -104,7 +104,7 @@ action:
                             - alias: Voice Assistant
                               conditions:
                                 - condition: template
-                                  value_template: "{{ repeat.item.startswith('media_player.assist_') }}"
+                                  value_template: "{{ repeat.item is string and repeat.item.startswith('media_player.assist_') }}"
                               sequence:
                                 - service: assist_pipeline.speak
                                   data:
@@ -115,7 +115,7 @@ action:
                             - alias: Iné prehrávače
                               conditions:
                                 - condition: template
-                                  value_template: "{{ not repeat.item.startswith('media_player.assist_') }}"
+                                  value_template: "{{ repeat.item is string and not repeat.item.startswith('media_player.assist_') }}"
                               sequence:
                                 - service: tts.google_translate_say
                                   target:
