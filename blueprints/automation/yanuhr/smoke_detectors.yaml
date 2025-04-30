@@ -169,10 +169,10 @@ action:
               - repeat:
                   for_each: "{{ tts_players }}"
                   sequence:
-                    - service: tts.google_translate_say
-                      target:
-                        entity_id: "{{ repeat.item }}"
+                    - service: tts.speak
                       data:
+                        cache: true
+                        media_player_entity_id: "{{ repeat.item }}"
                         message: "Pozor, bol detegovaný dym v {{ room_name }}"
                         language: sk
 
