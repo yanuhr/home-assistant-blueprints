@@ -75,15 +75,17 @@ action:
       filter_locations: >
         {% set locations = [] %}
         {% for sensor in new_notifications %}
-          {% set room = area_name(sensor) | default('Neznáma miestnosť') %}
-          {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
-          {% set locations = locations + [room ~ " – " ~ name] %}
+          {% if 'replace_filter' in sensor %}
+            {% set room = area_name(sensor) | default('Neznáma miestnosť') %}
+            {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
+            {% set locations = locations + [room ~ " – " ~ name] %}
+          {% endif %}
         {% endfor %}
         {{ locations | list }}
 
   - if:
       - condition: template
-        value_template: "{{ notification_services | length > 0 and new_notifications | length > 0 }}"
+        value_template: "{{ notification_services | length > 0 and filter_locations | length > 0 }}"
     then:
       - repeat:
           for_each: "{{ notification_services }}"
