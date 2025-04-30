@@ -116,4 +116,5 @@ action:
             {% set filtered_list = already_notified | reject('eq', trigger.entity_id) | list %}
             {{ filtered_list | join(',') }}
 
-mode: single
+mode: queued
+max: 10
