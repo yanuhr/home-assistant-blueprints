@@ -48,6 +48,12 @@ action:
         {% else %}
           Unknown
         {% endif %}
+      door_location: >-
+        {% if trigger is defined and trigger.entity_id is defined %}
+          {{ area_name(trigger.entity_id) | default(door_name) }}
+        {% else %}
+          Unknown
+        {% endif %}
       door_state: >-
         {% if trigger is defined and trigger.to_state is defined and trigger.to_state.state is defined %}
           {{ 'Otvorené' if trigger.to_state.state == 'on' else 'Zatvorené' }}
@@ -65,6 +71,6 @@ action:
             - service: "{{ repeat.item }}"
               data:
                 title: "Stav dverí"
-                message: "{{ door_name }}: {{ door_state }}"
+                message: "{{ door_location }}: {{ door_state }}"
 
 mode: single
