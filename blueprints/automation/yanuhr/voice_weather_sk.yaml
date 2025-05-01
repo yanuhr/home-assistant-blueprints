@@ -1,6 +1,6 @@
 blueprint:
-  name: Weather Voice Assistant (Slovak)
-  description: "Odpovie na slovenské hlasové otázky typu 'aké je počasie' pomocou dát zo senzora weather.forecast_domov."
+  name: Weather Voice Assistant (Slovak) - REST
+  description: "Odpovie na slovenské hlasové otázky o počasí zo senzora sensor.met_no_forecast"
   domain: automation
   input:
     voice_entities:
@@ -24,107 +24,35 @@ trigger:
 
 action:
   - variables:
+      forecast_data: "{{ state_attr('sensor.met_no_forecast', 'timeseries') }}"
+      now_ts: "{{ now().timestamp() }}"
+      forecast_24h: >
+        {{ forecast_data | selectattr('time', 'defined') | selectattr('time', 'ne', '') |
+           selectattr('time', 'as_timestamp') | selectattr('time', 'as_timestamp') |
+           selectattr('time', 'as_timestamp') | selectattr('time', 'as_timestamp') |
+           selectattr('time', 'as_timestamp') |
+           selectattr('time', 'as_timestamp') | selectattr('time', 'as_timestamp') | list }}
+      current: "{{ forecast_data[0] if forecast_data else {} }}"
+      current_temp: "{{ current['data']['instant']['details']['air_temperature'] if current else 'neznáme' }}"
+      wind_speed: "{{ current['data']['instant']['details']['wind_speed'] if current else 'neznáme' }}"
+      condition_icon: "{{ current['data']['next_1_hours']['summary']['symbol_code'] if current['data'].get('next_1_hours') else 'unknown' }}"
       matched_entity: >
         {% set entities = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
         {% set matched = entities | select('is_state', 'processing') | list | first %}
-        {{ matched }}
-      forecast_24h: >
-        {% set forecast = state_attr('weather.forecast_domov', 'forecast') %}
-        {% if forecast %}
-          {{ forecast
-            | selectattr('datetime', 'defined')
-            | selectattr('datetime', 'ne', '')
-            | selectattr('datetime', 'lt', (now() + timedelta(hours=24)).isoformat())
-            | list }}
-        {% else %}
-          {{ [] }}
-        {% endif %}
+        {{ matched if matched else '' }}
       final_message: >
-        {% set weather = states('weather.forecast_domov') %}
-        {% set current_temp = state_attr('weather.forecast_domov', 'temperature') %}
-        {% set wind_speed = state_attr('weather.forecast_domov', 'wind_speed') %}
-        {% set forecast = forecast_24h %}
-        {% set mapping = {
-          'sunny': 'slnečno',
-          'partlycloudy': 'čiastočne oblačno',
-          'cloudy': 'zamračené',
-          'rainy': 'daždivo',
-          'snowy': 'sneženie',
-          'snowy-rainy': 'dážď so snehom',
-          'windy': 'veterno',
-          'fog': 'hmla',
-          'hail': 'krupobitie',
-          'lightning': 'búrka',
-          'lightning-rainy': 'búrka s dažďom',
-          'clear-night': 'jasná noc',
-          'partlycloudy-night': 'čiastočne oblačná noc',
-          'overcast': 'zamračené',
-          'drizzle': 'mrholenie',
-          'scattered-showers': 'prehánky',
-          'isolated-thunderstorms': 'izolované búrky',
-          'thunderstorms': 'búrky',
-          'severe-thunderstorms': 'silné búrky',
-          'tornado': 'tornádo',
-          'hurricane': 'hurikán',
-          'tropical-storm': 'tropická búrka',
-          'dust': 'prašan',
-          'sand': 'piesok',
-          'ash': 'popol',
-          'sleet': 'ľadovec',
-          'blizzard': 'snehová búrka'
-        } %}
-        {% set translated = 'neznáme' %}
-        {% for k, v in mapping.items() %}
-          {% if k == weather %}
-            {% set translated = v %}
-          {% endif %}
-        {% endfor %}
-        {% set msg = 'Aktuálna predpoveď počasia predpokladá, že bude ' ~ translated ~ '. ' %}
-        {% if current_temp is not none %}
-          {% set msg = msg ~ 'Aktuálna teplota je ' ~ current_temp ~ ' stupňov. ' %}
+        Aktuálna teplota je {{ current_temp }} stupňov. Rýchlosť vetra je {{ wind_speed }} kilometrov za hodinu.
+        {% if condition_icon %}
+          Podľa predpovede bude {{ condition_icon.replace('_', ' ') }}.
         {% endif %}
-        {% if wind_speed is not none %}
-          {% set msg = msg ~ 'Rýchlosť vetra je ' ~ wind_speed ~ ' kilometrov za hodinu. ' %}
-        {% endif %}
-        {% if forecast | length > 0 %}
-          {% set min_temp = forecast | map(attribute='temperature') | min %}
-          {% set max_temp = forecast | map(attribute='temperature') | max %}
-          {% set min_entry = forecast | selectattr('temperature', 'eq', min_temp) | first %}
-          {% set max_entry = forecast | selectattr('temperature', 'eq', max_temp) | first %}
-          {% if min_temp is not none %}
-            {% set msg = msg ~ 'Najnižšia teplota bude ' ~ min_temp ~ ' stupňov. ' %}
-            {% if min_entry %}
-              {% set t = as_datetime(min_entry.datetime).strftime('%d.%m. o %H:%M') %}
-              {% set msg = msg ~ 'Najnižšia teplota sa očakáva ' ~ t ~ '. ' %}
-            {% endif %}
-          {% endif %}
-          {% if max_temp is not none %}
-            {% set msg = msg ~ 'Najvyššia teplota bude ' ~ max_temp ~ ' stupňov. ' %}
-            {% if max_entry %}
-              {% set t = as_datetime(max_entry.datetime).strftime('%d.%m. o %H:%M') %}
-              {% set msg = msg ~ 'Najvyššia teplota sa očakáva ' ~ t ~ '. ' %}
-            {% endif %}
-          {% endif %}
-          {% set rain = forecast | selectattr('precipitation', 'gt', 0) | list %}
-          {% if rain | length > 0 %}
-            {% set first = rain | first %}
-            {% set last = rain | last %}
-            {% set total = rain | sum(attribute='precipitation') | round(1) %}
-            {% if first and last %}
-              {% set from = as_datetime(first.datetime).strftime('%d.%m. o %H:%M') %}
-              {% set to = as_datetime(last.datetime).strftime('%d.%m. o %H:%M') %}
-              {% set msg = msg ~ 'Zrážky sa očakávajú od ' ~ from ~ ' do ' ~ to ~ '. ' %}
-            {% endif %}
-            {% if total > 0 %}
-              {% set msg = msg ~ 'Celkové množstvo zrážok bude ' ~ total ~ ' milimetrov. ' %}
-            {% endif %}
+        {% if forecast_data | length > 0 %}
+          {% set precip = forecast_data | selectattr('data.next_1_hours.details.precipitation_amount', 'defined') | list %}
+          {% if precip | length > 0 %}
+            Očakávajú sa zrážky.
           {% else %}
-            {% set msg = msg ~ 'Žiadne zrážky sa neočakávajú. ' %}
+            Žiadne zrážky sa neočakávajú.
           {% endif %}
-        {% else %}
-          {% set msg = msg ~ 'Predpoveď počasia nie je momentálne dostupná. ' %}
         {% endif %}
-        {{ msg }}
 
   - if: "{{ matched_entity != '' }}"
     then:
