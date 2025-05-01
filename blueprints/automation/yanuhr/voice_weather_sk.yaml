@@ -73,7 +73,6 @@ blueprint:
       selector:
         entity:
           domain: sensor
-  language: sk
 
 trigger:
   - platform: conversation
