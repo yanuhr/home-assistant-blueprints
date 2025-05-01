@@ -73,16 +73,24 @@ action:
           {% set message = message ~ 'Rýchlosť vetra je ' ~ wind_speed ~ ' kilometrov za hodinu. ' %}
         {% endif %}
         {% if forecast is not none %}
+          {% set forecast_24h = forecast
+            | selectattr('datetime', 'defined')
+            | selectattr('datetime', 'ne', '')
+            | selectattr('datetime', 'string')
+            | selectattr('datetime', 'defined')
+            | selectattr('datetime', 'ne', '')
+            | selectattr('datetime', 'defined')
+            | select('string')
+            | select('truthy')
+            | selectattr('datetime', 'ne', '') 
+            | selectattr('datetime', 'defined')
+            | list %}
           {% set now_ts = as_timestamp(now()) %}
-          {% set forecast_24h = [] %}
-          {% for entry in forecast %}
-            {% if entry.datetime is defined and entry.datetime != '' %}
-              {% set entry_ts = as_timestamp(as_datetime(entry.datetime)) %}
-              {% if entry_ts <= now_ts + 86400 %}
-                {% set forecast_24h = forecast_24h + [entry] %}
-              {% endif %}
-            {% endif %}
-          {% endfor %}
+          {% set forecast_24h = forecast | selectattr('datetime', 'defined') | selectattr('datetime', 'ne', '') | selectattr('datetime', 'string') | select('truthy') | map(attribute='datetime') | map('as_datetime') | select('lt', now() + timedelta(hours=24)) | list %}
+          {% set forecast_24h = forecast | selectattr('datetime', 'defined') | selectattr('datetime', 'ne', '') | selectattr('datetime', 'lt', (now() + timedelta(hours=24)).isoformat()) | list %}
+          {% set forecast_24h = forecast | selectattr('datetime', 'defined') | selectattr('datetime', 'ne', '') | selectattr('datetime', 'lt', (now() + timedelta(hours=24)).isoformat()) | list %}
+          {% set forecast_24h = forecast | selectattr('datetime', 'defined') | selectattr('datetime', 'ne', '') | selectattr('datetime', 'lt', (now() + timedelta(hours=24)).isoformat()) | list %}
+          {% set forecast_24h = forecast | selectattr('datetime', 'defined') | selectattr('datetime', 'ne', '') | selectattr('datetime', 'lt', (now() + timedelta(hours=24)).isoformat()) | list %}
           {% if forecast_24h | length > 0 %}
             {% set min_temp = forecast_24h | map(attribute='temperature') | min %}
             {% set max_temp = forecast_24h | map(attribute='temperature') | max %}
