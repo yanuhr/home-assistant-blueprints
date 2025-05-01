@@ -24,40 +24,40 @@ trigger:
 
 action:
   - variables:
-      condition_mapping: >
-        {
-          'sunny': 'slnečno',
-          'partlycloudy': 'čiastočne oblačno',
-          'cloudy': 'zamračené',
-          'rainy': 'daždivo',
-          'snowy': 'sneženie',
-          'snowy-rainy': 'dážď so snehom',
-          'windy': 'veterno',
-          'fog': 'hmla',
-          'hail': 'krupobitie',
-          'lightning': 'búrka',
-          'lightning-rainy': 'búrka s dažďom',
-          'clear-night': 'jasná noc',
-          'partlycloudy-night': 'čiastočne oblačná noc',
-          'overcast': 'zamračené',
-          'drizzle': 'mrholenie',
-          'scattered-showers': 'prehánky',
-          'isolated-thunderstorms': 'izolované búrky',
-          'thunderstorms': 'búrky',
-          'severe-thunderstorms': 'silné búrky',
-          'tornado': 'tornádo',
-          'hurricane': 'hurikán',
-          'tropical-storm': 'tropická búrka',
-          'dust': 'prašan',
-          'sand': 'piesok',
-          'ash': 'popol',
-          'sleet': 'ľadovec',
-          'blizzard': 'snehová búrka'
-        }
+      condition_mapping:
+        sunny: slnečno
+        partlycloudy: čiastočne oblačno
+        cloudy: zamračené
+        rainy: daždivo
+        snowy: sneženie
+        snowy-rainy: dážď so snehom
+        windy: veterno
+        fog: hmla
+        hail: krupobitie
+        lightning: búrka
+        lightning-rainy: búrka s dažďom
+        clear-night: jasná noc
+        partlycloudy-night: čiastočne oblačná noc
+        overcast: zamračené
+        drizzle: mrholenie
+        scattered-showers: prehánky
+        isolated-thunderstorms: izolované búrky
+        thunderstorms: búrky
+        severe-thunderstorms: silné búrky
+        tornado: tornádo
+        hurricane: hurikán
+        tropical-storm: tropická búrka
+        dust: prašan
+        sand: piesok
+        ash: popol
+        sleet: ľadovec
+        blizzard: snehová búrka
+
       matched_entity: >
         {% set entities = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
         {% set matched = entities | select('is_state', 'processing') | list | first %}
         {{ matched }}
+
       forecast_24h: >
         {% set forecast = state_attr('weather.forecast_domov', 'forecast') %}
         {% if forecast %}
@@ -69,11 +69,12 @@ action:
         {% else %}
           {{ [] }}
         {% endif %}
+
       final_message: >
         {% set weather = states('weather.forecast_domov') %}
         {% set current_temp = state_attr('weather.forecast_domov', 'temperature') %}
         {% set wind_speed = state_attr('weather.forecast_domov', 'wind_speed') %}
-        {% set condition_translated = condition_mapping.get(weather, 'neznáme') %}
+        {% set condition_translated = condition_mapping[weather] if weather in condition_mapping else 'neznáme' %}
         {% set forecast = forecast_24h %}
         {% set message = 'Aktuálna predpoveď počasia predpokladá, že bude ' ~ condition_translated ~ '. ' %}
         {% if current_temp is not none %}
