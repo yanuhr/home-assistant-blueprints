@@ -44,36 +44,41 @@ action:
         {% set current_temp = state_attr('weather.forecast_domov', 'temperature') %}
         {% set wind_speed = state_attr('weather.forecast_domov', 'wind_speed') %}
         {% set forecast = forecast_24h %}
-        {% set mapping = dict(
-          sunny='slnečno',
-          partlycloudy='čiastočne oblačno',
-          cloudy='zamračené',
-          rainy='daždivo',
-          snowy='sneženie',
-          snowy_rainy='dážď so snehom',
-          windy='veterno',
-          fog='hmla',
-          hail='krupobitie',
-          lightning='búrka',
-          lightning_rainy='búrka s dažďom',
-          clear_night='jasná noc',
-          partlycloudy_night='čiastočne oblačná noc',
-          overcast='zamračené',
-          drizzle='mrholenie',
-          scattered_showers='prehánky',
-          isolated_thunderstorms='izolované búrky',
-          thunderstorms='búrky',
-          severe_thunderstorms='silné búrky',
-          tornado='tornádo',
-          hurricane='hurikán',
-          tropical_storm='tropická búrka',
-          dust='prašan',
-          sand='piesok',
-          ash='popol',
-          sleet='ľadovec',
-          blizzard='snehová búrka'
-        ) %}
-        {% set translated = mapping[weather] if weather in mapping else 'neznáme' %}
+        {% set mapping = {
+          'sunny': 'slnečno',
+          'partlycloudy': 'čiastočne oblačno',
+          'cloudy': 'zamračené',
+          'rainy': 'daždivo',
+          'snowy': 'sneženie',
+          'snowy-rainy': 'dážď so snehom',
+          'windy': 'veterno',
+          'fog': 'hmla',
+          'hail': 'krupobitie',
+          'lightning': 'búrka',
+          'lightning-rainy': 'búrka s dažďom',
+          'clear-night': 'jasná noc',
+          'partlycloudy-night': 'čiastočne oblačná noc',
+          'overcast': 'zamračené',
+          'drizzle': 'mrholenie',
+          'scattered-showers': 'prehánky',
+          'isolated-thunderstorms': 'izolované búrky',
+          'thunderstorms': 'búrky',
+          'severe-thunderstorms': 'silné búrky',
+          'tornado': 'tornádo',
+          'hurricane': 'hurikán',
+          'tropical-storm': 'tropická búrka',
+          'dust': 'prašan',
+          'sand': 'piesok',
+          'ash': 'popol',
+          'sleet': 'ľadovec',
+          'blizzard': 'snehová búrka'
+        } %}
+        {% set translated = 'neznáme' %}
+        {% for k, v in mapping.items() %}
+          {% if k == weather %}
+            {% set translated = v %}
+          {% endif %}
+        {% endfor %}
         {% set msg = 'Aktuálna predpoveď počasia predpokladá, že bude ' ~ translated ~ '. ' %}
         {% if current_temp is not none %}
           {% set msg = msg ~ 'Aktuálna teplota je ' ~ current_temp ~ ' stupňov. ' %}
