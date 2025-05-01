@@ -1,0 +1,162 @@
+blueprint:
+  name: Weather Voice Assistant (Slovak)
+  description: "Voice assistant blueprint for weather announcements in Slovak language"
+  domain: automation
+  input:
+    weather_entity:
+      name: Weather Entity
+      description: "The weather entity to get forecast from"
+      default: weather.forecast_domov
+      selector:
+        entity:
+          domain: weather
+    voice_entities:
+      name: Voice Entities
+      description: "List of voice entities to use for announcements"
+      selector:
+        entity:
+          domain: assist_satellite
+          multiple: true
+    commands:
+      name: Voice Commands
+      description: "List of Slovak phrases that trigger the weather announcement"
+      default:
+        - aké je počasie
+        - ako je vonku
+        - aké je počasie vonku
+        - aké je vonku počasie
+        - aká je predpoveď počasia
+        - aké bude počasie
+        - aké dnes bude počasie
+      selector:
+        text:
+          multiple: true
+    current_temp_sensor:
+      name: Current Temperature Sensor
+      description: "Optional sensor for current temperature in words"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    min_temp_sensor:
+      name: Minimum Temperature Sensor
+      description: "Optional sensor for minimum temperature in words"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    min_temp_time_sensor:
+      name: Minimum Temperature Time Sensor
+      description: "Optional sensor for minimum temperature time in words"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    max_temp_sensor:
+      name: Maximum Temperature Sensor
+      description: "Optional sensor for maximum temperature in words"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    max_temp_time_sensor:
+      name: Maximum Temperature Time Sensor
+      description: "Optional sensor for maximum temperature time in words"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    wind_speed_sensor:
+      name: Wind Speed Sensor
+      description: "Optional sensor for wind speed in words"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+  language: sk
+
+trigger:
+  - platform: conversation
+    command: !input commands
+
+action:
+  - variables:
+      weather_entity: !input weather_entity
+      current_temp_sensor: !input current_temp_sensor
+      min_temp_sensor: !input min_temp_sensor
+      min_temp_time_sensor: !input min_temp_time_sensor
+      max_temp_sensor: !input max_temp_sensor
+      max_temp_time_sensor: !input max_temp_time_sensor
+      wind_speed_sensor: !input wind_speed_sensor
+      condition_mapping: >
+        {% set mapping = {
+          'sunny': 'slnečno',
+          'partlycloudy': 'čiastočne oblačno',
+          'cloudy': 'zamračené',
+          'rainy': 'daždivo',
+          'snowy': 'sneženie',
+          'snowy-rainy': 'dážď so snehom',
+          'windy': 'veterno',
+          'fog': 'hmla',
+          'hail': 'krupobitie',
+          'lightning': 'búrka',
+          'lightning-rainy': 'búrka s dažďom',
+          'clear-night': 'jasná noc',
+          'partlycloudy-night': 'čiastočne oblačná noc',
+          'overcast': 'zamračené',
+          'drizzle': 'mrholenie',
+          'scattered-showers': 'prehánky',
+          'isolated-thunderstorms': 'izolované búrky',
+          'thunderstorms': 'búrky',
+          'severe-thunderstorms': 'silné búrky',
+          'tornado': 'tornádo',
+          'hurricane': 'hurikán',
+          'tropical-storm': 'tropická búrka',
+          'dust': 'prašan',
+          'sand': 'piesok',
+          'ash': 'popol',
+          'sleet': 'ľadovec',
+          'blizzard': 'snehová búrka'
+        } %}
+        {{ mapping }}
+      matched_entity: >
+        {% set entities = states | selectattr('entity_id', 'search', 'assist_satellite.*') | map(attribute='entity_id') | list %}
+        {% set matched_entity = entities | select('is_state', 'processing') | list | first %}
+        {{ matched_entity }}
+      condition: "{{ states(weather_entity) }}"
+      condition_translated: "{{ condition_mapping.get(condition, 'neznáme') }}"
+      current_temp: "{{ states(current_temp_sensor) if current_temp_sensor else none }}"
+      min_temp: "{{ states(min_temp_sensor) if min_temp_sensor else none }}"
+      min_temp_time: "{{ states(min_temp_time_sensor) if min_temp_time_sensor else none }}"
+      max_temp: "{{ states(max_temp_sensor) if max_temp_sensor else none }}"
+      max_temp_time: "{{ states(max_temp_time_sensor) if max_temp_time_sensor else none }}"
+      wind_speed: "{{ states(wind_speed_sensor) if wind_speed_sensor else none }}"
+  - if: "{{ matched_entity is not none }}"
+    then:
+      - service: assist_satellite.announce
+        data:
+          message: >
+            {% set message = [] %}
+            {% do message.append('Aktuálna predpoveď počasia predpokladá, že bude ' ~ condition_translated ~ '.') %}
+            {% if current_temp %}
+              {% do message.append('Aktuálne je vonku ' ~ current_temp ~ '.') %}
+            {% endif %}
+            {% if min_temp %}
+              {% do message.append('Najnižšia očakávaná teplota bude ' ~ min_temp ~ '.') %}
+            {% endif %}
+            {% if min_temp_time %}
+              {% do message.append('Najnižšia teplota sa očakáva dňa ' ~ min_temp_time ~ '.') %}
+            {% endif %}
+            {% if max_temp %}
+              {% do message.append('Najvyššia očakávaná teplota bude ' ~ max_temp ~ '.') %}
+            {% endif %}
+            {% if max_temp_time %}
+              {% do message.append('Najvyššia teplota sa očakáva dňa ' ~ max_temp_time ~ '.') %}
+            {% endif %}
+            {% if wind_speed %}
+              {% do message.append('Aktuálna rýchlosť vetra je ' ~ wind_speed ~ '.') %}
+            {% endif %}
+            {{ message | join(' ') }}
+          entity_id: "{{ matched_entity }}"
+
+mode: single
