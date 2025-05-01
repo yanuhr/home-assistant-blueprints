@@ -68,10 +68,10 @@ action:
         {{ matched_entity }}
       final_message: >
         {% set message = [] %}
-        {% set weather = states(input.weather_entity) %}
-        {% set forecast = state_attr(input.weather_entity, 'forecast') %}
-        {% set current_temp = state_attr(input.weather_entity, 'temperature') %}
-        {% set wind_speed = state_attr(input.weather_entity, 'wind_speed') %}
+        {% set weather = states('!input weather_entity') %}
+        {% set forecast = state_attr('!input weather_entity', 'forecast') %}
+        {% set current_temp = state_attr('!input weather_entity', 'temperature') %}
+        {% set wind_speed = state_attr('!input weather_entity', 'wind_speed') %}
         {% set condition_translated = condition_mapping.get(weather, 'neznáme') %}
 
         {% set _ = message.append('Aktuálna predpoveď počasia predpokladá, že bude ' ~ condition_translated ~ '.') %}
