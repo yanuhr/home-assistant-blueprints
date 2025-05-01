@@ -1,11 +1,11 @@
 blueprint:
   name: Weather Voice Assistant (Slovak)
-  description: "Odpovie na hlasové otázky typu 'aké je počasie' pomocou REST senzora met.no"
+  description: "Slovenská hlasová predpoveď pomocou REST senzora met.no"
   domain: automation
   input:
     voice_entities:
-      name: Voice Assist Entities
-      description: "Zariadenia, ktoré môžu ohlásiť predpoveď"
+      name: Assist Zariadenia
+      description: "Zoznam zariadení, ktoré môžu ohlásiť predpoveď"
       selector:
         entity:
           domain: assist_satellite
@@ -24,13 +24,14 @@ trigger:
 
 action:
   - variables:
-      timeseries: "{{ state_attr('sensor.met_no_forecast', 'timeseries') }}"
-      current: "{{ timeseries[0] if timeseries is defined and timeseries | length > 0 else {} }}"
-      code: "{{ current.data.next_1_hours.summary.symbol_code if current and current.data and current.data.next_1_hours and current.data.next_1_hours.summary else 'unknown' }}"
-      temp: "{{ current.data.instant.details.air_temperature if current and current.data and current.data.instant and current.data.instant.details else '?' }}"
-      wind: "{{ current.data.instant.details.wind_speed if current and current.data and current.data.instant and current.data.instant.details else '?' }}"
-      rain: "{{ current.data.next_1_hours.details.precipitation_amount if current and current.data and current.data.next_1_hours and current.data.next_1_hours.details else 0 }}"
-      text: >
+      ts: "{{ state_attr('sensor.met_no_forecast', 'timeseries') }}"
+      first: "{{ ts[0] if ts is defined and ts | length > 0 else {} }}"
+      details: "{{ first['data']['instant']['details'] if 'data' in first and 'instant' in first['data'] and 'details' in first['data']['instant'] else {} }}"
+      code: "{{ first['data']['next_1_hours']['summary']['symbol_code'] if 'data' in first and 'next_1_hours' in first['data'] and 'summary' in first['data']['next_1_hours'] else 'unknown' }}"
+      rain: "{{ first['data']['next_1_hours']['details']['precipitation_amount'] if 'data' in first and 'next_1_hours' in first['data'] and 'details' in first['data']['next_1_hours'] else 0 }}"
+      temp: "{{ details['air_temperature'] if 'air_temperature' in details else '?' }}"
+      wind: "{{ details['wind_speed'] if 'wind_speed' in details else '?' }}"
+      condition_text: >
         {% set map = {
           "clearsky_day": "jasno",
           "clearsky_night": "jasná noc",
@@ -48,28 +49,25 @@ action:
           "heavyrainshowers_day": "silné prehánky",
           "lightrainshowers_day": "slabé prehánky"
         } %}
-        {{ map[code] if code in map else "neznáme" }}
-      device: >
-        {% set list = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
-        {% set found = list | select('is_state', 'processing') | list | first %}
-        {{ found }}
-
-      forecast: >
-        Aktuálne je {{ text }}.
-        Teplota je {{ temp }} °C.
-        Rýchlosť vetra {{ wind }} km/h.
+        {{ map[code] if code in map else 'neznáme' }}
+      matched_entity: >
+        {% set all = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
+        {% set match = all | select('is_state', 'processing') | list | first %}
+        {{ match if match else all[0] if all|length > 0 else '' }}
+      message: >
+        Aktuálne je {{ condition_text }}. Teplota {{ temp }} °C. Vietor {{ wind }} km/h.
         {% if rain | float > 0 %}
-          Zrážky: približne {{ rain }} mm v najbližšej hodine.
+          Očakávajú sa zrážky: približne {{ rain }} mm.
         {% else %}
           Zrážky sa neočakávajú.
         {% endif %}
 
-  - if: "{{ device != '' }}"
+  - if: "{{ matched_entity != '' }}"
     then:
       - service: assist_satellite.announce
         target:
-          entity_id: "{{ device }}"
+          entity_id: "{{ matched_entity }}"
         data:
-          message: "{{ forecast }}"
+          message: "{{ message }}"
 
 mode: single
