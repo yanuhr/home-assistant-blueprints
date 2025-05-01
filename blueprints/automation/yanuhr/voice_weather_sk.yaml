@@ -60,20 +60,17 @@ action:
         {% set matched = entities | select('is_state', 'processing') | list | first %}
         {{ matched }}
       final_message: >
-        {% set message = [] %}
         {% set weather = states('weather.forecast_domov') %}
         {% set forecast = state_attr('weather.forecast_domov', 'forecast') %}
         {% set current_temp = state_attr('weather.forecast_domov', 'temperature') %}
         {% set wind_speed = state_attr('weather.forecast_domov', 'wind_speed') %}
         {% set condition_translated = condition_mapping.get(weather, 'neznáme') %}
-
-        {% set _ = message.append('Aktuálna predpoveď počasia predpokladá, že bude ' ~ condition_translated ~ '.') %}
-
+        {% set message = 'Aktuálna predpoveď počasia predpokladá, že bude ' ~ condition_translated ~ '. ' %}
         {% if current_temp is not none %}
-          {% set _ = message.append('Aktuálna teplota je ' ~ current_temp ~ ' stupňov.') %}
+          {% set message = message ~ 'Aktuálna teplota je ' ~ current_temp ~ ' stupňov. ' %}
         {% endif %}
         {% if wind_speed is not none %}
-          {% set _ = message.append('Rýchlosť vetra je ' ~ wind_speed ~ ' kilometrov za hodinu.') %}
+          {% set message = message ~ 'Rýchlosť vetra je ' ~ wind_speed ~ ' kilometrov za hodinu. ' %}
         {% endif %}
         {% if forecast is not none %}
           {% set now_ts = as_timestamp(now()) %}
@@ -82,7 +79,7 @@ action:
             {% if entry.datetime is defined and entry.datetime != '' %}
               {% set entry_ts = as_timestamp(as_datetime(entry.datetime)) %}
               {% if entry_ts <= now_ts + 86400 %}
-                {% set _ = forecast_24h.append(entry) %}
+                {% set forecast_24h = forecast_24h + [entry] %}
               {% endif %}
             {% endif %}
           {% endfor %}
@@ -92,17 +89,17 @@ action:
             {% set min_entry = forecast_24h | selectattr('temperature', 'eq', min_temp) | first %}
             {% set max_entry = forecast_24h | selectattr('temperature', 'eq', max_temp) | first %}
             {% if min_temp is not none %}
-              {% set _ = message.append('Najnižšia teplota bude ' ~ min_temp ~ ' stupňov.') %}
+              {% set message = message ~ 'Najnižšia teplota bude ' ~ min_temp ~ ' stupňov. ' %}
               {% if min_entry %}
                 {% set formatted = as_datetime(min_entry.datetime).strftime('%d.%m. o %H:%M') %}
-                {% set _ = message.append('Najnižšia teplota sa očakáva ' ~ formatted ~ '.') %}
+                {% set message = message ~ 'Najnižšia teplota sa očakáva ' ~ formatted ~ '. ' %}
               {% endif %}
             {% endif %}
             {% if max_temp is not none %}
-              {% set _ = message.append('Najvyššia teplota bude ' ~ max_temp ~ ' stupňov.') %}
+              {% set message = message ~ 'Najvyššia teplota bude ' ~ max_temp ~ ' stupňov. ' %}
               {% if max_entry %}
                 {% set formatted = as_datetime(max_entry.datetime).strftime('%d.%m. o %H:%M') %}
-                {% set _ = message.append('Najvyššia teplota sa očakáva ' ~ formatted ~ '.') %}
+                {% set message = message ~ 'Najvyššia teplota sa očakáva ' ~ formatted ~ '. ' %}
               {% endif %}
             {% endif %}
             {% set precip_entries = forecast_24h | selectattr('precipitation', 'gt', 0) | list %}
@@ -113,19 +110,19 @@ action:
               {% if first and last %}
                 {% set from = as_datetime(first.datetime).strftime('%d.%m. o %H:%M') %}
                 {% set to = as_datetime(last.datetime).strftime('%d.%m. o %H:%M') %}
-                {% set _ = message.append('Zrážky sa očakávajú od ' ~ from ~ ' do ' ~ to ~ '.') %}
+                {% set message = message ~ 'Zrážky sa očakávajú od ' ~ from ~ ' do ' ~ to ~ '. ' %}
               {% endif %}
               {% if total > 0 %}
-                {% set _ = message.append('Celkové množstvo zrážok bude ' ~ total ~ ' milimetrov.') %}
+                {% set message = message ~ 'Celkové množstvo zrážok bude ' ~ total ~ ' milimetrov. ' %}
               {% endif %}
             {% else %}
-              {% set _ = message.append('Žiadne zrážky sa neočakávajú.') %}
+              {% set message = message ~ 'Žiadne zrážky sa neočakávajú. ' %}
             {% endif %}
           {% endif %}
         {% else %}
-          {% set _ = message.append('Predpoveď počasia nie je momentálne dostupná.') %}
+          {% set message = message ~ 'Predpoveď počasia nie je momentálne dostupná. ' %}
         {% endif %}
-        {{ message | join(' ') }}
+        {{ message }}
 
   - if: "{{ matched_entity != '' }}"
     then:
