@@ -25,33 +25,43 @@ trigger:
 action:
   - variables:
       forecast_data: "{{ state_attr('sensor.met_no_forecast', 'timeseries') }}"
-      now_ts: "{{ now().timestamp() }}"
-      forecast_24h: >
-        {{ forecast_data | selectattr('time', 'defined') | selectattr('time', 'ne', '') |
-           selectattr('time', 'as_timestamp') | selectattr('time', 'as_timestamp') |
-           selectattr('time', 'as_timestamp') | selectattr('time', 'as_timestamp') |
-           selectattr('time', 'as_timestamp') |
-           selectattr('time', 'as_timestamp') | selectattr('time', 'as_timestamp') | list }}
-      current: "{{ forecast_data[0] if forecast_data else {} }}"
-      current_temp: "{{ current['data']['instant']['details']['air_temperature'] if current else 'neznáme' }}"
-      wind_speed: "{{ current['data']['instant']['details']['wind_speed'] if current else 'neznáme' }}"
-      condition_icon: "{{ current['data']['next_1_hours']['summary']['symbol_code'] if current['data'].get('next_1_hours') else 'unknown' }}"
+      current: "{{ forecast_data[0] if forecast_data is iterable and forecast_data | length > 0 else {} }}"
+      current_temp: >
+        {% if current.get('data') and current.data.instant.details.air_temperature is defined %}
+          {{ current.data.instant.details.air_temperature }}
+        {% else %}
+          neznáme
+        {% endif %}
+      wind_speed: >
+        {% if current.get('data') and current.data.instant.details.wind_speed is defined %}
+          {{ current.data.instant.details.wind_speed }}
+        {% else %}
+          neznáme
+        {% endif %}
+      condition_icon: >
+        {% if current.get('data') and current.data.next_1_hours is defined %}
+          {{ current.data.next_1_hours.summary.symbol_code.replace('_', ' ') }}
+        {% else %}
+          neznáme
+        {% endif %}
+      precipitation_amount: >
+        {% if current.get('data') and current.data.next_1_hours.details.precipitation_amount is defined %}
+          {{ current.data.next_1_hours.details.precipitation_amount }}
+        {% else %}
+          0
+        {% endif %}
       matched_entity: >
         {% set entities = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
         {% set matched = entities | select('is_state', 'processing') | list | first %}
         {{ matched if matched else '' }}
       final_message: >
-        Aktuálna teplota je {{ current_temp }} stupňov. Rýchlosť vetra je {{ wind_speed }} kilometrov za hodinu.
-        {% if condition_icon %}
-          Podľa predpovede bude {{ condition_icon.replace('_', ' ') }}.
-        {% endif %}
-        {% if forecast_data | length > 0 %}
-          {% set precip = forecast_data | selectattr('data.next_1_hours.details.precipitation_amount', 'defined') | list %}
-          {% if precip | length > 0 %}
-            Očakávajú sa zrážky.
-          {% else %}
-            Žiadne zrážky sa neočakávajú.
-          {% endif %}
+        Aktuálna teplota je {{ current_temp }} stupňov. 
+        Rýchlosť vetra je {{ wind_speed }} kilometrov za hodinu. 
+        Podľa predpovede bude {{ condition_icon }}. 
+        {% if precipitation_amount | float > 0 %}
+          Očakávajú sa zrážky s úhrnom približne {{ precipitation_amount }} mm.
+        {% else %}
+          Žiadne zrážky sa neočakávajú.
         {% endif %}
 
   - if: "{{ matched_entity != '' }}"
