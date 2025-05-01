@@ -69,6 +69,8 @@ action:
   - if: "{{ matched_entity != '' }}"
     then:
       - service: assist_satellite.announce
+        target:
+          entity_id: "{{ matched_entity }}"
         data:
           message: >
             {% set message = [] %}
@@ -144,6 +146,5 @@ action:
               {% do message.append('Predpoveď počasia nie je momentálne dostupná.') %}
             {% endif %}
             {{ message | join(' ') }}
-          entity_id: "{{ matched_entity }}"
 
 mode: single
