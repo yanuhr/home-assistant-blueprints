@@ -1,15 +1,59 @@
 blueprint:
   name: Weather Voice Assistant (Slovak)
-  description: "Slovenská hlasová predpoveď pomocou REST senzora met.no"
+  description: "Hlasový asistent oznamujúce slovenskú predpoveď počasia"
   domain: automation
   input:
     voice_entities:
-      name: Assist Zariadenia
+      name: Voice Assist Entities
       description: "Zoznam zariadení, ktoré môžu ohlásiť predpoveď"
       selector:
         entity:
           domain: assist_satellite
           multiple: true
+
+define:
+  number_to_words: &number_to_words
+    0: "nula"
+    1: "jedna"
+    2: "dve"
+    3: "tri"
+    4: "štyri"
+    5: "päť"
+    6: "šesť"
+    7: "sedem"
+    8: "osem"
+    9: "deväť"
+    10: "desať"
+    11: "jedenásť"
+    12: "dvanásť"
+    13: "trinásť"
+    14: "štrnásť"
+    15: "pätnásť"
+    16: "šestnásť"
+    17: "sedemnásť"
+    18: "osemnásť"
+    19: "devätnásť"
+    20: "dvadsať"
+    21: "dvadsať jedna"
+    22: "dvadsať dva"
+    23: "dvadsať tri"
+    24: "dvadsať štyri"
+    25: "dvadsať päť"
+    26: "dvadsať šesť"
+    27: "dvadsať sedem"
+    28: "dvadsať osem"
+    29: "dvadsať deväť"
+    30: "tridsať"
+    31: "tridsať jedna"
+    32: "tridsať dva"
+    33: "tridsať tri"
+    34: "tridsať štyri"
+    35: "tridsať päť"
+    36: "tridsať šesť"
+    37: "tridsať sedem"
+    38: "tridsať osem"
+    39: "tridsať deväť"
+    40: "štyridsať"
 
 trigger:
   - platform: conversation
@@ -24,50 +68,25 @@ trigger:
 
 action:
   - variables:
-      ts: "{{ state_attr('sensor.met_no_forecast', 'timeseries') }}"
-      first: "{{ ts[0] if ts is defined and ts | length > 0 else {} }}"
-      details: "{{ first['data']['instant']['details'] if 'data' in first and 'instant' in first['data'] and 'details' in first['data']['instant'] else {} }}"
-      code: "{{ first['data']['next_1_hours']['summary']['symbol_code'] if 'data' in first and 'next_1_hours' in first['data'] and 'summary' in first['data']['next_1_hours'] else 'unknown' }}"
-      rain: "{{ first['data']['next_1_hours']['details']['precipitation_amount'] if 'data' in first and 'next_1_hours' in first['data'] and 'details' in first['data']['next_1_hours'] else 0 }}"
-      temp: "{{ details['air_temperature'] if 'air_temperature' in details else '?' }}"
-      wind: "{{ details['wind_speed'] if 'wind_speed' in details else '?' }}"
-      condition_text: >
-        {% set map = {
-          "clearsky_day": "jasno",
-          "clearsky_night": "jasná noc",
-          "fair_day": "polojasno",
-          "fair_night": "polojasná noc",
-          "partlycloudy_day": "čiastočne oblačno",
-          "partlycloudy_night": "čiastočne oblačná noc",
-          "cloudy": "zamračené",
-          "rain": "dážď",
-          "lightrain": "slabý dážď",
-          "heavyrain": "silný dážď",
-          "snow": "sneženie",
-          "fog": "hmla",
-          "rainshowers_day": "prehánky",
-          "heavyrainshowers_day": "silné prehánky",
-          "lightrainshowers_day": "slabé prehánky"
-        } %}
-        {{ map[code] if code in map else 'neznáme' }}
-      matched_entity: >
-        {% set all = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
-        {% set match = all | select('is_state', 'processing') | list | first %}
-        {{ match if match else all[0] if all|length > 0 else '' }}
-      message: >
-        Aktuálne je {{ condition_text }}. Teplota {{ temp }} °C. Vietor {{ wind }} km/h.
-        {% if rain | float > 0 %}
-          Očakávajú sa zrážky: približne {{ rain }} mm.
-        {% else %}
-          Zrážky sa neočakávajú.
-        {% endif %}
+      number_to_words: *number_to_words
+      metno: "sensor.met_no_forecast"
+      timeseries: "{{ state_attr(metno, 'timeseries') }}"
+      current_temp: >
+        {% set val = state_attr('weather.forecast_domov', 'temperature') | float(default=0) %}
+        {% set int_part = val | int %}
+        {% set dec_part = ((val - int_part)*10)|round|int %}
+        {{ number_to_words[int_part] }}{% if dec_part > 0 %} celých {{ number_to_words[dec_part] }}{% endif %} stupňov
+      wind_speed: >
+        {% set val = state_attr('weather.forecast_domov', 'wind_speed') | float(default=0) %}
+        {% set int_part = val | int %}
+        {% set dec_part = ((val - int_part)*10)|round|int %}
+        {{ number_to_words[int_part] }}{% if dec_part > 0 %} celých {{ number_to_words[dec_part] }}{% endif %} kilometrov za hodinu
 
-  - if: "{{ matched_entity != '' }}"
-    then:
-      - service: assist_satellite.announce
-        target:
-          entity_id: "{{ matched_entity }}"
-        data:
-          message: "{{ message }}"
+  - service: assist_satellite.announce
+    target:
+      entity_id: "{{ states | selectattr('entity_id','search','assist_satellite.') | selectattr('state','eq','processing') | map(attribute='entity_id') | list | first }}"
+    data:
+      message: >
+        Počasie je aktuálne {{ current_temp }}. Rýchlosť vetra je {{ wind_speed }}. Predpoveď bude doplnená.
 
 mode: single
