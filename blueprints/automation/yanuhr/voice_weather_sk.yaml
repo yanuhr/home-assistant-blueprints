@@ -1,11 +1,11 @@
 blueprint:
-  name: Weather Voice Assistant (Slovak) - REST
-  description: "Odpovie na slovenské hlasové otázky o počasí zo senzora sensor.met_no_forecast"
+  name: Weather Voice Assistant (Slovak)
+  description: "Odpovie na hlasové otázky typu 'aké je počasie' zo senzora met.no REST"
   domain: automation
   input:
     voice_entities:
       name: Voice Assist Entities
-      description: "Zoznam zariadení, ktoré môžu ohlásiť predpoveď"
+      description: "Zariadenia, ktoré môžu ohlásiť predpoveď"
       selector:
         entity:
           domain: assist_satellite
@@ -24,42 +24,41 @@ trigger:
 
 action:
   - variables:
-      forecast_data: "{{ state_attr('sensor.met_no_forecast', 'timeseries') }}"
-      current: "{{ forecast_data[0] if forecast_data is iterable and forecast_data | length > 0 else {} }}"
-      current_temp: >
-        {% if current.get('data') and current.data.instant.details.air_temperature is defined %}
-          {{ current.data.instant.details.air_temperature }}
-        {% else %}
-          neznáme
-        {% endif %}
-      wind_speed: >
-        {% if current.get('data') and current.data.instant.details.wind_speed is defined %}
-          {{ current.data.instant.details.wind_speed }}
-        {% else %}
-          neznáme
-        {% endif %}
-      condition_icon: >
-        {% if current.get('data') and current.data.next_1_hours is defined %}
-          {{ current.data.next_1_hours.summary.symbol_code.replace('_', ' ') }}
-        {% else %}
-          neznáme
-        {% endif %}
-      precipitation_amount: >
-        {% if current.get('data') and current.data.next_1_hours.details.precipitation_amount is defined %}
-          {{ current.data.next_1_hours.details.precipitation_amount }}
-        {% else %}
-          0
-        {% endif %}
+      timeseries: "{{ state_attr('sensor.met_no_forecast', 'timeseries') }}"
+      current: "{{ timeseries[0] if timeseries is defined and timeseries | length > 0 else {} }}"
+      condition_code: "{{ current['data']['next_1_hours']['summary']['symbol_code'] if current.get('data') and current['data'].get('next_1_hours') else 'unknown' }}"
+      temperature: "{{ current['data']['instant']['details']['air_temperature'] if current.get('data') else 'neznáme' }}"
+      wind_speed: "{{ current['data']['instant']['details']['wind_speed'] if current.get('data') else 'neznáme' }}"
+      precipitation: "{{ current['data']['next_1_hours']['details']['precipitation_amount'] if current.get('data') and current['data'].get('next_1_hours') and current['data']['next_1_hours'].get('details') else 0 }}"
+      mapping: {
+        "clearsky_day": "jasno",
+        "clearsky_night": "jasná noc",
+        "fair_day": "polojasno",
+        "fair_night": "polojasná noc",
+        "partlycloudy_day": "čiastočne oblačno",
+        "partlycloudy_night": "čiastočne oblačná noc",
+        "cloudy": "zamračené",
+        "rain": "dážď",
+        "lightrain": "slabý dážď",
+        "heavyrain": "silný dážď",
+        "snow": "sneženie",
+        "fog": "hmla",
+        "heavyrainshowers_day": "silné prehánky",
+        "rainshowers_day": "prehánky",
+        "lightrainshowers_day": "slabé prehánky"
+      }
+      condition_text: "{{ mapping.get(condition_code, 'neznáme') }}"
       matched_entity: >
         {% set entities = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
         {% set matched = entities | select('is_state', 'processing') | list | first %}
-        {{ matched if matched else '' }}
+        {{ matched }}
+
       final_message: >
-        Aktuálna teplota je {{ current_temp }} stupňov. 
-        Rýchlosť vetra je {{ wind_speed }} kilometrov za hodinu. 
-        Podľa predpovede bude {{ condition_icon }}. 
-        {% if precipitation_amount | float > 0 %}
-          Očakávajú sa zrážky s úhrnom približne {{ precipitation_amount }} mm.
+        Aktuálne je {{ condition_text }}.
+        Teplota je {{ temperature }} stupňov.
+        Rýchlosť vetra je {{ wind_speed }} km/h.
+        {% if precipitation | float > 0 %}
+          Očakáva sa zrážky približne {{ precipitation }} mm v najbližšej hodine.
         {% else %}
           Žiadne zrážky sa neočakávajú.
         {% endif %}
