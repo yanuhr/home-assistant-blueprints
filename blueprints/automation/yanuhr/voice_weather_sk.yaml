@@ -68,10 +68,10 @@ action:
         {{ matched_entity }}
       final_message: >
         {% set message = [] %}
-        {% set weather = states('!input weather_entity') %}
-        {% set forecast = state_attr('!input weather_entity', 'forecast') %}
-        {% set current_temp = state_attr('!input weather_entity', 'temperature') %}
-        {% set wind_speed = state_attr('!input weather_entity', 'wind_speed') %}
+        {% set weather = states(i('weather_entity')) %}
+        {% set forecast = state_attr(i('weather_entity'), 'forecast') %}
+        {% set current_temp = state_attr(i('weather_entity'), 'temperature') %}
+        {% set wind_speed = state_attr(i('weather_entity'), 'wind_speed') %}
         {% set condition_translated = condition_mapping.get(weather, 'neznáme') %}
 
         {% set _ = message.append('Aktuálna predpoveď počasia predpokladá, že bude ' ~ condition_translated ~ '.') %}
@@ -95,13 +95,13 @@ action:
               {% endif %}
             {% endif %}
           {% endfor %}
-          
+
           {% if forecast_24h | length > 0 %}
             {% set min_temp = forecast_24h | map(attribute='temperature') | min %}
             {% set max_temp = forecast_24h | map(attribute='temperature') | max %}
             {% set min_temp_entry = forecast_24h | selectattr('temperature', 'eq', min_temp) | first %}
             {% set max_temp_entry = forecast_24h | selectattr('temperature', 'eq', max_temp) | first %}
-            
+
             {% if min_temp is not none %}
               {% set _ = message.append('Najnižšia teplota bude ' ~ min_temp ~ ' stupňov.') %}
               {% if min_temp_entry %}
@@ -109,7 +109,7 @@ action:
                 {% set _ = message.append('Najnižšia teplota sa očakáva ' ~ formatted_time ~ '.') %}
               {% endif %}
             {% endif %}
-            
+
             {% if max_temp is not none %}
               {% set _ = message.append('Najvyššia teplota bude ' ~ max_temp ~ ' stupňov.') %}
               {% if max_temp_entry %}
@@ -117,13 +117,13 @@ action:
                 {% set _ = message.append('Najvyššia teplota sa očakáva ' ~ formatted_time ~ '.') %}
               {% endif %}
             {% endif %}
-            
+
             {% set precipitation_entries = forecast_24h | selectattr('precipitation', 'gt', 0) | list %}
             {% if precipitation_entries | length > 0 %}
               {% set first_precip = precipitation_entries | first %}
               {% set last_precip = precipitation_entries | last %}
               {% set total_precip = precipitation_entries | sum(attribute='precipitation') | round(1) %}
-              
+
               {% if first_precip and last_precip %}
                 {% set start_time = as_datetime(first_precip.datetime).strftime('%d.%m. o %H:%M') %}
                 {% set end_time = as_datetime(last_precip.datetime).strftime('%d.%m. o %H:%M') %}
@@ -140,6 +140,7 @@ action:
           {% set _ = message.append('Predpoveď počasia nie je momentálne dostupná.') %}
         {% endif %}
         {{ message | join(' ') }}
+
   - if: "{{ matched_entity != '' }}"
     then:
       - service: assist_satellite.announce
