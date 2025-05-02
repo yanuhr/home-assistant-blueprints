@@ -1,7 +1,7 @@
 blueprint:
   name: Weather Voice Assistant (Slovak - autodetect)
   description: >
-    Slovenský hlasový asistent počasia (s predikciou zrážok a výslovnosťou čísel),
+    Slovenský hlasový asistent počasia (s predikciou zrážok, časom a trvaním),
     ktorý automaticky zistí Assist Satellite v stave 'processing' a odpovie cez neho.
     Nepotrebuje vstupný zoznam entít.
   domain: automation
@@ -48,16 +48,37 @@ action:
         {% set lst = forecast[:24] | map(attribute='data.instant.details.air_temperature') | list %}
         {{ lst | max }}
 
+      min_temp_time: >-
+        {% set val = forecast[:24] | sort(attribute='data.instant.details.air_temperature') | first %}
+        {% set hour = val.time[11:13] | int %}
+        {% set minute = val.time[14:16] | int %}
+        {{ number_to_words[hour] ~ ' hodín a ' ~ number_to_words[minute] ~ ' minút' }}
+
+      max_temp_time: >-
+        {% set val = forecast[:24] | sort(attribute='data.instant.details.air_temperature', reverse=true) | first %}
+        {% set hour = val.time[11:13] | int %}
+        {% set minute = val.time[14:16] | int %}
+        {{ number_to_words[hour] ~ ' hodín a ' ~ number_to_words[minute] ~ ' minút' }}
+
       precip_hours: >-
-        {% set rains = forecast[:24]
-           | selectattr('data.next_1_hours.details.precipitation_amount','gt',0)
-           | list %}
+        {% set rains = forecast[:24] | selectattr('data.next_1_hours.details.precipitation_amount','gt',0) | list %}
         {{ rains }}
       total_precip: >-
-        {% set vals = forecast[:24]
-           | map(attribute='data.next_1_hours.details.precipitation_amount')
-           | select('defined') | map('float') | list %}
+        {% set vals = forecast[:24] | map(attribute='data.next_1_hours.details.precipitation_amount') | select('defined') | map('float') | list %}
         {{ vals | sum | round(1) }}
+
+      rain_period: >-
+        {% if precip_hours | length > 0 %}
+          {% set first = precip_hours[0].time[11:16] %}
+          {% set last = precip_hours[-1].time[11:16] %}
+          {% set start_hour = first.split(':')[0] | int %}
+          {% set start_minute = first.split(':')[1] | int %}
+          {% set end_hour = last.split(':')[0] | int %}
+          {% set end_minute = last.split(':')[1] | int %}
+          Od {{ number_to_words[start_hour] }} {{ 'hodín' }} {{ number_to_words[start_minute] }} minút do {{ number_to_words[end_hour] }} hodín {{ number_to_words[end_minute] }} minút
+        {% else %}
+          ''
+        {% endif %}
 
       matched_entity: >-
         {% set entities = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
@@ -82,16 +103,16 @@ action:
         {%- set mdt = ((min_temp - mit)*10) | round | int %}
         {%- set msg = msg ~ 'Najnižšia teplota bude ' ~ number_to_words[mit] %}
         {%- if mdt > 0 %}{%- set msg = msg ~ ' celých ' ~ number_to_words[mdt] %}{%- endif %}
-        {%- set msg = msg ~ ' stupňov. ' %}
+        {%- set msg = msg ~ ' stupňov o ' ~ min_temp_time ~ '. ' %}
 
         {%- set mat = max_temp | int %}
         {%- set mdt2 = ((max_temp - mat)*10) | round | int %}
         {%- set msg = msg ~ 'Najvyššia teplota bude ' ~ number_to_words[mat] %}
         {%- if mdt2 > 0 %}{%- set msg = msg ~ ' celých ' ~ number_to_words[mdt2] %}{%- endif %}
-        {%- set msg = msg ~ ' stupňov. ' %}
+        {%- set msg = msg ~ ' stupňov o ' ~ max_temp_time ~ '. ' %}
 
         {%- if precip_hours | length > 0 %}
-          {%- set msg = msg ~ 'Zrážky sa očakávajú, celkovo ' ~ total_precip ~ ' mm. ' %}
+          {%- set msg = msg ~ 'Očakávané zrážky od ' ~ rain_period ~ '. Spolu ' ~ total_precip ~ ' milimetrov. ' %}
         {%- else %}
           {%- set msg = msg ~ 'Žiadne zrážky sa neočakávajú. ' %}
         {%- endif %}
