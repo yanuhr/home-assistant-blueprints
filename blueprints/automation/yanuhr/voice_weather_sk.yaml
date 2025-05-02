@@ -97,7 +97,7 @@ action:
           {% set decp = ((total - intp) * 10) | round | int %}
           {% set total_words = number_to_words[intp] ~ ' celých ' ~ number_to_words[decp] %}
           {% set h = f.time[11:13] | int %}
-          Ocakávané zrážky okolo {{ hour_ordinal[h] }} hodiny budú spolu asi {{ total_words }} milimetrov.
+          Očakávané zrážky okolo {{ hour_ordinal[h] }} hodiny budú spolu asi {{ total_words }} milimetrov.
         {% else %}
           Žiadne zrážky sa neočakávajú.
         {% endif %}
