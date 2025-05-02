@@ -4,6 +4,7 @@ blueprint:
     Slovenský hlasový asistent počasia (s predikciou zrážok a výslovnosťou čísel),
     ktorý odpovie iba cez ten Assist Satellite, na ktorom užívateľ rozpráva.
   domain: automation
+
   input:
     voice_entities:
       name: Voice Assist Entities
@@ -22,7 +23,7 @@ trigger:
 
 action:
   - variables:
-      # zoznam všetkých zadaných satelitov
+      # zoznam satelitov z inputu
       voice_entities: !input voice_entities
 
       # prevod čísel na slová (0–59)
@@ -44,12 +45,12 @@ action:
           57: 'päťdesiat sedem', 58: 'päťdesiat osem', 59: 'päťdesiat deväť'
         } }}
 
-      # vstupné dáta
+      # dáta z Met.no REST senzora a predpoveď HA weather
       forecast: "{{ state_attr('sensor.met_no_forecast','timeseries') }}"
       current_temp: "{{ state_attr('weather.forecast_domov','temperature') | float }}"
       wind_speed: "{{ state_attr('weather.forecast_domov','wind_speed') | float }}"
 
-      # min/max teplota v nasledujúcich 24 h
+      # min a max teplota v najbližších 24 hodinách
       min_temp: >-
         {% set t = forecast[:24] | map(attribute='data.instant.details.air_temperature') | list %}
         {{ t | min }}
@@ -57,7 +58,7 @@ action:
         {% set t = forecast[:24] | map(attribute='data.instant.details.air_temperature') | list %}
         {{ t | max }}
 
-      # zrážky v nasledujúcich 24 h
+      # zrážkové hodiny a ich súhrn
       precip_hours: >-
         {% set r = forecast[:24]
            | selectattr('data.next_1_hours.details.precipitation_amount','gt',0)
@@ -71,13 +72,12 @@ action:
            | list %}
         {{ amt | sum | round(1) }}
 
-      # identifikácia zariadenia, ktoré práve spracováva rozpoznávanie
+      # zisti, ktoré zariadenie spracovalo hlas
       matched_entity: >-
-        {% set ves = voice_entities %}
-        {% set m = ves | select('is_state','processing') | list %}
-        {{ m[0] if m | length > 0 else '' }}
+        {% set ent = trigger.event.data.entity_id | default('') %}
+        {% if ent in voice_entities %}{{ ent }}{% else %}{% endif %}
 
-      # skladanie detailnej hlasovej správy
+      # zostav ovládací reťazec správy
       message_text: >-
         {%- set msg = '' %}
         {%- set it = current_temp | int %}
@@ -113,8 +113,7 @@ action:
         {%- set msg = msg ~ ' stupňov. ' -%}
 
         {%- if precip_hours | length > 0 -%}
-          {%- set msg = msg ~ 'Zrážky sa očakávajú. Celkové množstvo bude '
-                            ~ total_precip ~ ' mm. ' -%}
+          {%- set msg = msg ~ 'Zrážky sa očakávajú, celkovo ' ~ total_precip ~ ' milimetrov. ' -%}
         {%- else -%}
           {%- set msg = msg ~ 'Žiadne zrážky sa neočakávajú. ' -%}
         {%- endif -%}
