@@ -42,12 +42,10 @@ action:
           57:'päťdesiat sedem',58:'päťdesiat osem',59:'päťdesiat deväť'
         } }}
 
-      # Naše zdroje dát
       forecast: "{{ state_attr('sensor.met_no_forecast','timeseries') }}"
       current_temp: "{{ state_attr('weather.forecast_domov','temperature') | float }}"
       wind_speed: "{{ state_attr('weather.forecast_domov','wind_speed') | float }}"
 
-      # Min/Max v ďalších 24 h
       min_temp: >-
         {% set lst = forecast[:24] | map(attribute='data.instant.details.air_temperature') | list %}
         {{ lst | min }}
@@ -55,7 +53,6 @@ action:
         {% set lst = forecast[:24] | map(attribute='data.instant.details.air_temperature') | list %}
         {{ lst | max }}
 
-      # Zrážkové záznamy a celkový súčet
       precip_hours: >-
         {% set rains = forecast[:24]
            | selectattr('data.next_1_hours.details.precipitation_amount','gt',0)
@@ -67,60 +64,46 @@ action:
            | select('defined') | map('float') | list %}
         {{ vals | sum | round(1) }}
 
-      # Zisti ten jediný Assist Satellite, ktorý je práve 'processing'
-      matched_entity: >-
-        {% set found = '' %}
-        {% for ent in voice_entities %}
-          {% if is_state(ent,'processing') %}
-            {% set found = ent %}
-            {% break %}
-          {% endif %}
-        {% endfor %}
-        {{ found }}
+      # 📌 Získaj správne ID satelitu z triggeru
+      matched_entity: "{{ trigger.event.data.satellite_id if trigger.event.data.satellite_id is defined else '' }}"
 
-      # Vytvor text správy
       message_text: >-
         {%- set msg = '' %}
-        {#--- Teplota ---#}
         {%- set it = current_temp | int %}
         {%- set dt = ((current_temp - it)*10) | round | int %}
         {%- set msg = msg ~ 'Aktuálna teplota je ' ~ number_to_words[it] %}
-        {%- if dt > 0 -%}{%- set msg = msg ~ ' celých ' ~ number_to_words[dt] -%}{%- endif -%}
-        {%- set msg = msg ~ ' stupňov Celzia. ' -%}
+        {%- if dt > 0 %}{%- set msg = msg ~ ' celých ' ~ number_to_words[dt] %}{%- endif %}
+        {%- set msg = msg ~ ' stupňov Celzia. ' %}
 
-        {#--- Vietor ---#}
         {%- set iw = wind_speed | int %}
         {%- set dw = ((wind_speed - iw)*10) | round | int %}
         {%- set msg = msg ~ 'Rýchlosť vetra je ' ~ number_to_words[iw] %}
-        {%- if dw > 0 -%}{%- set msg = msg ~ ' celých ' ~ number_to_words[dw] -%}{%- endif -%}
-        {%- set msg = msg ~ ' kilometrov za hodinu. ' -%}
+        {%- if dw > 0 %}{%- set msg = msg ~ ' celých ' ~ number_to_words[dw] %}{%- endif %}
+        {%- set msg = msg ~ ' kilometrov za hodinu. ' %}
 
-        {#--- Min/Max ---#}
         {%- set mit = min_temp | int %}
         {%- set mdt = ((min_temp - mit)*10) | round | int %}
         {%- set msg = msg ~ 'Najnižšia teplota bude ' ~ number_to_words[mit] %}
-        {%- if mdt > 0 -%}{%- set msg = msg ~ ' celých ' ~ number_to_words[mdt] -%}{%- endif -%}
-        {%- set msg = msg ~ ' stupňov. ' -%}
+        {%- if mdt > 0 %}{%- set msg = msg ~ ' celých ' ~ number_to_words[mdt] %}{%- endif %}
+        {%- set msg = msg ~ ' stupňov. ' %}
 
         {%- set mat = max_temp | int %}
         {%- set mdt2 = ((max_temp - mat)*10) | round | int %}
         {%- set msg = msg ~ 'Najvyššia teplota bude ' ~ number_to_words[mat] %}
-        {%- if mdt2 > 0 -%}{%- set msg = msg ~ ' celých ' ~ number_to_words[mdt2] -%}{%- endif -%}
-        {%- set msg = msg ~ ' stupňov. ' -%}
+        {%- if mdt2 > 0 %}{%- set msg = msg ~ ' celých ' ~ number_to_words[mdt2] %}{%- endif %}
+        {%- set msg = msg ~ ' stupňov. ' %}
 
-        {#--- Zrážky ---#}
-        {%- if precip_hours | length > 0 -%}
-          {%- set msg = msg ~ 'Zrážky sa očakávajú, celkovo ' ~ total_precip ~ ' mm. ' -%}
-        {%- else -%}
-          {%- set msg = msg ~ 'Žiadne zrážky sa neočakávajú. ' -%}
-        {%- endif -%}
+        {%- if precip_hours | length > 0 %}
+          {%- set msg = msg ~ 'Zrážky sa očakávajú, celkovo ' ~ total_precip ~ ' mm. ' %}
+        {%- else %}
+          {%- set msg = msg ~ 'Žiadne zrážky sa neočakávajú. ' %}
+        {%- endif %}
 
         {{ msg }}
 
   - choose:
       - conditions:
           - condition: template
-            # vykonaj len ak matched_entity nie je prázdny
             value_template: "{{ matched_entity != '' }}"
         sequence:
           - service: assist_satellite.announce
@@ -128,5 +111,3 @@ action:
               entity_id: "{{ matched_entity }}"
             data:
               message: "{{ message_text }}"
-
-mode: single
