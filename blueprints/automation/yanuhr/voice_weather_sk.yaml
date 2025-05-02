@@ -64,15 +64,8 @@ action:
         {{ vals | sum | round(1) }}
 
       # ✅ Jediný satelit, ktorý je aktuálne v stave "processing"
-      matched_entity: >-
-        {% set found = '' %}
-        {% for ent in voice_entities %}
-          {% if is_state(ent, 'processing') %}
-            {% set found = ent %}
-            {% break %}
-          {% endif %}
-        {% endfor %}
-        {{ found }}
+	matched_entity: "{{ trigger.to_state.entity_id }}"
+
 
       message_text: >-
         {%- set msg = '' %}
