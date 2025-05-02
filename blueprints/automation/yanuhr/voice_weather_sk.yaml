@@ -5,6 +5,7 @@ blueprint:
   input:
     voice_entities:
       name: Voice Assist Entities
+      description: Zoznam zariadení Assist Satellite, ktoré budú hlásiť predpoveď
       selector:
         entity:
           domain: assist_satellite
@@ -19,85 +20,118 @@ trigger:
 
 action:
   - variables:
+      # Slovenské číselné mapovanie od 0 po 59
       number_to_words: >
-        {{
-          {
-            0: 'nula', 1: 'jedna', 2: 'dve', 3: 'tri', 4: 'štyri', 5: 'päť',
-            6: 'šesť', 7: 'sedem', 8: 'osem', 9: 'deväť', 10: 'desať',
-            11: 'jedenásť', 12: 'dvanásť', 13: 'trinásť', 14: 'štrnásť', 15: 'pätnásť',
-            16: 'šestnásť', 17: 'sedemnásť', 18: 'osemnásť', 19: 'devätnásť', 20: 'dvadsať',
-            21: 'dvadsať jedna', 22: 'dvadsať dva', 23: 'dvadsať tri', 24: 'dvadsať štyri',
-            25: 'dvadsať päť', 26: 'dvadsať šesť', 27: 'dvadsať sedem', 28: 'dvadsať osem',
-            29: 'dvadsať deväť', 30: 'tridsať', 31: 'tridsať jedna', 32: 'tridsať dva',
-            33: 'tridsať tri', 34: 'tridsať štyri', 35: 'tridsať päť', 36: 'tridsať šesť',
-            37: 'tridsať sedem', 38: 'tridsať osem', 39: 'tridsať deväť', 40: 'štyridsať',
-            41: 'štyridsať jedna', 42: 'štyridsať dva', 43: 'štyridsať tri', 44: 'štyridsať štyri',
-            45: 'štyridsať päť', 46: 'štyridsať šesť', 47: 'štyridsať sedem', 48: 'štyridsať osem',
-            49: 'štyridsať deväť', 50: 'päťdesiat', 51: 'päťdesiat jedna', 52: 'päťdesiat dva',
-            53: 'päťdesiat tri', 54: 'päťdesiat štyri', 55: 'päťdesiat päť', 56: 'päťdesiat šesť',
-            57: 'päťdesiat sedem', 58: 'päťdesiat osem', 59: 'päťdesiat deväť'
-          }
-        }}
+        {{ {
+          0: 'nula', 1: 'jedna', 2: 'dve', 3: 'tri', 4: 'štyri', 5: 'päť',
+          6: 'šesť', 7: 'sedem', 8: 'osem', 9: 'deväť', 10: 'desať',
+          11: 'jedenásť', 12: 'dvanásť', 13: 'trinásť', 14: 'štrnásť', 15: 'pätnásť',
+          16: 'šestnásť', 17: 'sedemnásť', 18: 'osemnásť', 19: 'devätnásť', 20: 'dvadsať',
+          21: 'dvadsať jedna', 22: 'dvadsať dva', 23: 'dvadsať tri', 24: 'dvadsať štyri',
+          25: 'dvadsať päť', 26: 'dvadsať šesť', 27: 'dvadsať sedem', 28: 'dvadsať osem',
+          29: 'dvadsať deväť', 30: 'tridsať', 31: 'tridsať jedna', 32: 'tridsať dva',
+          33: 'tridsať tri', 34: 'tridsať štyri', 35: 'tridsať päť', 36: 'tridsať šesť',
+          37: 'tridsať sedem', 38: 'tridsať osem', 39: 'tridsať deväť', 40: 'štyridsať',
+          41: 'štyridsať jedna', 42: 'štyridsať dva', 43: 'štyridsať tri', 44: 'štyridsať štyri',
+          45: 'štyridsať päť', 46: 'štyridsať šesť', 47: 'štyridsať sedem', 48: 'štyridsať osem',
+          49: 'štyridsať deväť', 50: 'päťdesiat', 51: 'päťdesiat jedna', 52: 'päťdesiat dva',
+          53: 'päťdesiat tri', 54: 'päťdesiat štyri', 55: 'päťdesiat päť', 56: 'päťdesiat šesť',
+          57: 'päťdesiat sedem', 58: 'päťdesiat osem', 59: 'päťdesiat deväť'
+        } }}
+
+      # surové dáta
       forecast: "{{ state_attr('sensor.met_no_forecast', 'timeseries') }}"
       current_temp: "{{ state_attr('weather.forecast_domov', 'temperature') | float }}"
       wind_speed: "{{ state_attr('weather.forecast_domov', 'wind_speed') | float }}"
-      min_temp: >
-        {% set temps = forecast[:24] | map(attribute='data.instant.details.air_temperature') | list %}
+
+      # min/max teploty za najbližších 24 hodín
+      min_temp: >-
+        {% set temps = forecast[:24]
+             | map(attribute='data.instant.details.air_temperature')
+             | list %}
         {{ temps | min }}
-      max_temp: >
-        {% set temps = forecast[:24] | map(attribute='data.instant.details.air_temperature') | list %}
+      max_temp: >-
+        {% set temps = forecast[:24]
+             | map(attribute='data.instant.details.air_temperature')
+             | list %}
         {{ temps | max }}
-      precip_hours: >
-        {% set rain = forecast[:24] | selectattr('data.next_1_hours.details.precipitation_amount', 'defined') | selectattr('data.next_1_hours.details.precipitation_amount', 'gt', 0) | list %}
+
+      # zrážkové údaje
+      precip_hours: >-
+        {% set rain = forecast[:24]
+             | selectattr('data.next_1_hours.details.precipitation_amount','gt',0)
+             | list %}
         {{ rain }}
-      total_precip: >
-        {% set rain = forecast[:24] | map(attribute='data.next_1_hours.details.precipitation_amount') | select('defined') | map('float') | list %}
-        {{ rain | sum | round(1) }}
+      total_precip: >-
+        {% set rain_amounts = forecast[:24]
+             | map(attribute='data.next_1_hours.details.precipitation_amount')
+             | select('defined')
+             | map('float')
+             | list %}
+        {{ rain_amounts | sum | round(1) }}
 
-      message_text: >
+      # vstupné zariadenia a výber spracovávajúceho
+      voice_entities: !input voice_entities
+      matched_entity: >-
+        {% set ve = voice_entities %}
+        {% if ve is iterable and ve | length > 0 %}
+          {% set m = ve
+               | selectattr('state','eq','processing')
+               | list
+               | first %}
+          {{ m if m is string else '' }}
+        {% else %}
+          ''
+        {% endif %}
+
+      # skladanie hlasovej správy
+      message_text: >-
         {%- set msg = "" %}
-        {%- set int_temp = current_temp | int %}
-        {%- set dec_temp = ((current_temp - int_temp) * 10) | round | int %}
-        {%- set msg = msg ~ "Aktuálna teplota je " ~ number_to_words[int_temp] %}
-        {%- if dec_temp > 0 %}
-          {%- set msg = msg ~ " celých " ~ number_to_words[dec_temp] %}
-        {%- endif %}
-        {%- set msg = msg ~ " stupňov Celzia. " %}
+        {%- set it = current_temp | int %}
+        {%- set dt = ((current_temp - it) * 10) | round | int %}
+        {%- set msg = msg ~ "Aktuálna teplota je " ~ number_to_words[it] %}
+        {%- if dt > 0 -%}
+          {%- set msg = msg ~ " celých " ~ number_to_words[dt] -%}
+        {%- endif -%}
+        {%- set msg = msg ~ " stupňov Celzia. " -%}
 
-        {%- set int_wind = wind_speed | int %}
-        {%- set dec_wind = ((wind_speed - int_wind) * 10) | round | int %}
-        {%- set msg = msg ~ "Rýchlosť vetra je " ~ number_to_words[int_wind] %}
-        {%- if dec_wind > 0 %}
-          {%- set msg = msg ~ " celých " ~ number_to_words[dec_wind] %}
-        {%- endif %}
-        {%- set msg = msg ~ " kilometrov za hodinu. " %}
+        {%- set iw = wind_speed | int %}
+        {%- set dw = ((wind_speed - iw) * 10) | round | int %}
+        {%- set msg = msg ~ "Rýchlosť vetra je " ~ number_to_words[iw] %}
+        {%- if dw > 0 -%}
+          {%- set msg = msg ~ " celých " ~ number_to_words[dw] -%}
+        {%- endif -%}
+        {%- set msg = msg ~ " kilometrov za hodinu. " -%}
 
-        {%- set min_int = min_temp | int %}
-        {%- set min_dec = ((min_temp - min_int) * 10) | round | int %}
-        {%- set msg = msg ~ "Najnižšia teplota bude " ~ number_to_words[min_int] %}
-        {%- if min_dec > 0 %}
-          {%- set msg = msg ~ " celých " ~ number_to_words[min_dec] %}
-        {%- endif %}
-        {%- set msg = msg ~ " stupňov. " %}
+        {%- set mit = min_temp | int %}
+        {%- set mdt = ((min_temp - mit) * 10) | round | int %}
+        {%- set msg = msg ~ "Najnižšia teplota bude " ~ number_to_words[mit] %}
+        {%- if mdt > 0 -%}
+          {%- set msg = msg ~ " celých " ~ number_to_words[mdt] -%}
+        {%- endif -%}
+        {%- set msg = msg ~ " stupňov. " -%}
 
-        {%- set max_int = max_temp | int %}
-        {%- set max_dec = ((max_temp - max_int) * 10) | round | int %}
-        {%- set msg = msg ~ "Najvyššia teplota bude " ~ number_to_words[max_int] %}
-        {%- if max_dec > 0 %}
-          {%- set msg = msg ~ " celých " ~ number_to_words[max_dec] %}
-        {%- endif %}
-        {%- set msg = msg ~ " stupňov. " %}
+        {%- set mat = max_temp | int %}
+        {%- set mdt2 = ((max_temp - mat) * 10) | round | int %}
+        {%- set msg = msg ~ "Najvyššia teplota bude " ~ number_to_words[mat] %}
+        {%- if mdt2 > 0 -%}
+          {%- set msg = msg ~ " celých " ~ number_to_words[mdt2] -%}
+        {%- endif -%}
+        {%- set msg = msg ~ " stupňov. " -%}
 
-        {%- if precip_hours | length > 0 %}
-          {%- set msg = msg ~ "Zrážky sa očakávajú a celkové množstvo bude " ~ total_precip ~ " milimetrov. " %}
-        {%- else %}
-          {%- set msg = msg ~ "Zrážky sa neočakávajú. " %}
-        {%- endif %}
+        {%- if precip_hours | length > 0 -%}
+          {%- set msg = msg ~ "Zrážky sa očakávajú. Celkové množstvo bude " 
+                            ~ total_precip ~ " mm. " -%}
+        {%- else -%}
+          {%- set msg = msg ~ "Žiadne zrážky sa neočakávajú. " -%}
+        {%- endif -%}
 
         {{ msg }}
 
   - choose:
-      - conditions: "{{ matched_entity != '' }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ matched_entity != '' }}"
         sequence:
           - service: assist_satellite.announce
             target:
