@@ -1,19 +1,12 @@
 blueprint:
-  name: Weather Voice Assistant (Slovak)
+  name: Weather Voice Assistant (Slovak - autodetect)
   description: >
     Slovenský hlasový asistent počasia (s predikciou zrážok a výslovnosťou čísel),
-    ktorý odpovie iba cez ten Assist Satellite, ktorý je práve v stave 'listening'.
-    Ak sa žiadny nenájde, zaloguje chybu do logbooku.
+    ktorý automaticky zistí Assist Satellite v stave 'processing' a odpovie cez neho.
+    Nepotrebuje vstupný zoznam entít.
   domain: automation
 
-  input:
-    voice_entities:
-      name: Voice Assist Entities
-      description: Zoznam vašich Assist Satellite entít (napr. assist_satellite.kuchyna)
-      selector:
-        entity:
-          domain: assist_satellite
-          multiple: true
+  input: {}
 
 trigger:
   - platform: conversation
@@ -21,11 +14,11 @@ trigger:
       - aké je počasie
       - aké bude počasie
       - aká je predpoveď počasia
+      - ako je vonku
+      - aké je vonku počasie
 
 action:
   - variables:
-      voice_entities_var: !input voice_entities
-
       number_to_words: >-
         {{ {
           0:'nula',1:'jedna',2:'dve',3:'tri',4:'štyri',5:'päť',
@@ -66,6 +59,11 @@ action:
            | select('defined') | map('float') | list %}
         {{ vals | sum | round(1) }}
 
+      matched_entity: >-
+        {% set entities = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
+        {% set processing = entities | select('is_state', 'processing') | list | first %}
+        {{ processing if processing else entities | first }}
+
       message_text: >-
         {%- set msg = '' %}
         {%- set it = current_temp | int %}
@@ -100,35 +98,10 @@ action:
 
         {{ msg }}
 
-  - choose:
-      - conditions: []
-        sequence:
-          - variables:
-              matched_entity: >-
-                {% for s in expand(voice_entities_var) %}
-                  {% if s.state == 'listening' %}
-                    {{ s.entity_id }}
-                    {% break %}
-                  {% endif %}
-                {% endfor %}
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ matched_entity != '' }}"
-                sequence:
-                  - service: assist_satellite.announce
-                    target:
-                      entity_id: "{{ matched_entity }}"
-                    data:
-                      message: "{{ message_text }}"
-                  - service: logbook.log
-                    data:
-                      name: "Hlasové počasie"
-                      message: "Správa oznámená cez {{ matched_entity }}"
-            default:
-              - service: logbook.log
-                data:
-                  name: "Hlasové počasie"
-                  message: "⚠️ Žiadny satelit nebol v stave 'listening' – neodoslané."
+  - service: assist_satellite.announce
+    target:
+      entity_id: "{{ matched_entity }}"
+    data:
+      message: "{{ message_text }}"
 
 mode: single
