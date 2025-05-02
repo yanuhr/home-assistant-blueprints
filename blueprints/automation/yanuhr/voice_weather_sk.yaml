@@ -63,9 +63,6 @@ action:
            | select('defined') | map('float') | list %}
         {{ vals | sum | round(1) }}
 
-      # ✅ Získaj správne ID satelitu z trigger objektu
-      matched_entity: "{{ trigger.satellite_id if trigger.satellite_id is defined else '' }}"
-
       message_text: >-
         {%- set msg = '' %}
         {%- set it = current_temp | int %}
@@ -103,11 +100,11 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ matched_entity != '' }}"
+            value_template: "{{ trigger.satellite_id is defined and trigger.satellite_id != '' }}"
         sequence:
           - service: assist_satellite.announce
             target:
-              entity_id: "{{ matched_entity }}"
+              entity_id: "{{ trigger.satellite_id }}"
             data:
               message: "{{ message_text }}"
 
