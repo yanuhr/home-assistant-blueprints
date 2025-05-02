@@ -8,7 +8,7 @@ blueprint:
   input:
     voice_entities:
       name: Voice Assist Entities
-      description: Zoznam vašich Assist Satellite entít
+      description: Zoznam vašich Assist Satellite entít (napr. assist_satellite.kuchyna)
       selector:
         entity:
           domain: assist_satellite
@@ -23,7 +23,6 @@ trigger:
 
 action:
   - variables:
-      # Pomôcka na prevod čísel 0–59 na slová
       number_to_words: >-
         {{ {
           0:'nula',1:'jedna',2:'dve',3:'tri',4:'štyri',5:'päť',
@@ -64,8 +63,8 @@ action:
            | select('defined') | map('float') | list %}
         {{ vals | sum | round(1) }}
 
-      # 📌 Získaj správne ID satelitu z triggeru
-      matched_entity: "{{ trigger.event.data.satellite_id if trigger.event.data.satellite_id is defined else '' }}"
+      # ✅ Získaj správne ID satelitu z trigger objektu
+      matched_entity: "{{ trigger.satellite_id if trigger.satellite_id is defined else '' }}"
 
       message_text: >-
         {%- set msg = '' %}
@@ -111,3 +110,5 @@ action:
               entity_id: "{{ matched_entity }}"
             data:
               message: "{{ message_text }}"
+
+mode: single
