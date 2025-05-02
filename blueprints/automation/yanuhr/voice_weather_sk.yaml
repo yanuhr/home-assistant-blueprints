@@ -63,13 +63,16 @@ action:
            | select('defined') | map('float') | list %}
         {{ vals | sum | round(1) }}
 
+      # ✅ Jediný satelit, ktorý je aktuálne v stave "processing"
       matched_entity: >-
+        {% set found = '' %}
         {% for ent in voice_entities %}
           {% if is_state(ent, 'processing') %}
-            {{ ent }}
+            {% set found = ent %}
             {% break %}
           {% endif %}
         {% endfor %}
+        {{ found }}
 
       message_text: >-
         {%- set msg = '' %}
