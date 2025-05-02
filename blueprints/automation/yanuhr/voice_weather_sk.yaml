@@ -92,13 +92,12 @@ action:
         {% set rains = forecast[:24] | selectattr('data.next_1_hours.details.precipitation_amount','gt',0) | list %}
         {% if rains | length > 0 %}
           {% set f = rains[0] %}
-          {% set l = rains[-1] %}
-          {% set fh = f.time[11:13] | int %}
-          {% set fm = f.time[14:16] | int %}
-          {% set lh = l.time[11:13] | int %}
-          {% set lm = l.time[14:16] | int %}
-          {% set total = forecast[:24] | map(attribute='data.next_1_hours.details.precipitation_amount') | select('defined') | map('float') | list | sum | round(1) %}
-          Očakávané zrážky medzi {{ hour_ordinal[fh] }} hodine{% if fm > 0 %} a {{ minute_ordinal[fm] }}{% endif %} a {{ hour_ordinal[lh] }} hodine{% if lm > 0 %} a {{ minute_ordinal[lm] }}{% endif %}. Spolu {{ total }} milimetrov.
+          {% set total = forecast[:24] | map(attribute='data.next_1_hours.details.precipitation_amount') | select('defined') | map('float') | list | sum %}
+          {% set intp = total | int %}
+          {% set decp = ((total - intp) * 10) | round | int %}
+          {% set total_words = number_to_words[intp] ~ ' celých ' ~ number_to_words[decp] %}
+          {% set h = f.time[11:13] | int %}
+          Ocakávané zrážky okolo {{ hour_ordinal[h] }} hodiny budú spolu asi {{ total_words }} milimetrov.
         {% else %}
           Žiadne zrážky sa neočakávajú.
         {% endif %}
@@ -124,7 +123,7 @@ action:
         {%- set mint = min_temp_data.temp | float -%}
         {%- set mit = mint | int -%}
         {%- set mdt = ((mint - mit)*10) | round | int -%}
-        {%- set msg = msg ~ 'Najnížšia teplota bude ' ~ number_to_words[mit] %}
+        {%- set msg = msg ~ 'Najnižšia teplota bude ' ~ number_to_words[mit] %}
         {%- if mdt > 0 %}{% set msg = msg ~ ' celých ' ~ number_to_words[mdt] %}{% endif %}
         {%- set msg = msg ~ ' stupňov ' ~ min_temp_data.time ~ '. ' %}
 
