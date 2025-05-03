@@ -1,0 +1,86 @@
+blueprint:
+  name: Hlasové ovládanie zámkov (TTS cez CarPlay)
+  description: >
+    Ovládaj smart zámky cez hlasové príkazy (napr. "zamkni garáž").
+    Funguje cez CarPlay a využíva TTS spätnú väzbu cez aktívny Assist Satellite.
+  domain: automation
+  input:
+    lock_aliases:
+      name: Zámky a aliasy
+      description: >
+        Zoznam názvov, ktoré používateľ vyslovuje (napr. "garáž") a im priradené entity zámkov.
+        Príklad: { "garáž": "lock.garazovy_zamok", "predné dvere": "lock.predne_dvere" }
+      selector:
+        object: {}
+
+    tts_success_message:
+      name: Šablóna výstupnej správy
+      description: >
+        Voliteľné: ako má znieť hlasové potvrdenie. Použi premenné {{ action }} a {{ name }}.
+        Príklad: "Zámok {{ name }} bol úspešne {{ action }}."
+      default: "Zámok {{ name }} bol úspešne {{ action }}."
+      selector:
+        text: {}
+
+trigger:
+  - platform: conversation
+    command:
+      - zamkni {name}
+      - odomkni {name}
+
+variables:
+  lock_aliases: !input lock_aliases
+  tts_template: !input tts_success_message
+  action_command: "{{ 'lock' if 'zamkni' in trigger.command else 'unlock' }}"
+  requested_name: "{{ trigger.slots.name }}"
+  matched_entity: >-
+    {% set n = requested_name.lower() %}
+    {% for k, v in lock_aliases.items() %}
+      {% if k | lower == n %}
+        {{ v }}
+      {% endif %}
+    {% endfor %}
+  matched_alias: >-
+    {% set n = requested_name.lower() %}
+    {% for k, v in lock_aliases.items() %}
+      {% if k | lower == n %}
+        {{ k }}
+      {% endif %}
+    {% endfor %}
+  matched_assist: >-
+    {% set entities = states | selectattr('entity_id', 'search', 'assist_satellite.') | map(attribute='entity_id') | list %}
+    {% set active = entities | select('is_state', 'processing') | list | first %}
+    {{ active if active else entities | first }}
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ matched_entity is not none and matched_entity != '' }}"
+        sequence:
+          - service: >-
+              {% if action_command == 'lock' %} lock.lock
+              {% else %} lock.unlock
+              {% endif %}
+            target:
+              entity_id: "{{ matched_entity }}"
+          - service: assist_satellite.announce
+            target:
+              entity_id: "{{ matched_assist }}"
+            data:
+              message: >-
+                {{ tts_template
+                  | replace("{{ action }}", ("zamknutý" if action_command == 'lock' else "odomknutý"))
+                  | replace("{{ name }}", matched_alias) }}
+
+      - conditions:
+          - condition: template
+            value_template: "{{ matched_entity is none or matched_entity == '' }}"
+        sequence:
+          - service: assist_satellite.announce
+            target:
+              entity_id: "{{ matched_assist }}"
+            data:
+              message: "Nepoznám zámok s názvom {{ requested_name }}. Skontroluj nastavenia."
+
+mode: single
