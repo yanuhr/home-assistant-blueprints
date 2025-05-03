@@ -1,8 +1,8 @@
 blueprint:
-  name: Hlasové ovládanie zámkov (TTS cez media_player)
+  name: Hlasové ovládanie zámkov (notifikácia)
   description: >
     Ovládanie smart zámkov cez hlasový príkaz typu "zamkni/odomkni <alias>"
-    s výstupným hlásením pomocou TTS na zvolených media_player zariadeniach.
+    s notifikačným potvrdením cez notify službu (napr. iPhone).
   domain: automation
   input:
     lock_aliases:
@@ -13,27 +13,17 @@ blueprint:
       selector:
         object: {}
 
-    tts_players:
-      name: TTS prehrávače
+    notify_service:
+      name: Notifikačná služba
       description: >
-        Zariadenia, na ktorých sa má prehrať hlasové potvrdenie.
-        (napr. media_player.iphone_jan, media_player.kuchyna)
-      selector:
-        entity:
-          domain: media_player
-          multiple: true
-
-    tts_language:
-      name: Jazyk TTS
-      default: sk
+        Vyber službu pre odoslanie notifikácie (napr. notify.mobile_app_iphone_jan).
       selector:
         text: {}
 
-    tts_message_template:
-      name: Šablóna výstupnej správy
+    notify_template:
+      name: Text správy
       description: >
-        Šablóna hlasovej odpovede. Použi {{ action }} a {{ name }}.
-        Napr. "Zámok {{ name }} bol úspešne {{ action }}."
+        Šablóna textu notifikácie. Použi {{ action }} a {{ name }}.
       default: "Zámok {{ name }} bol úspešne {{ action }}."
       selector:
         text: {}
@@ -46,9 +36,8 @@ trigger:
 
 variables:
   lock_aliases: !input lock_aliases
-  tts_players: !input tts_players
-  tts_lang: !input tts_language
-  tts_template: !input tts_message_template
+  notify_service: !input notify_service
+  notify_template: !input notify_template
 
   requested_name: "{{ trigger.slots.name | lower }}"
   action_type: >-
@@ -81,36 +70,22 @@ action:
               {% endif %}
             target:
               entity_id: "{{ matched_entity }}"
-          - repeat:
-              for_each: "{{ tts_players }}"
-              sequence:
-                - service: tts.speak
-                  data:
-                    cache: true
-                    media_player_entity_id: "{{ repeat.item }}"
-                    message: >-
-                      {{ tts_template
-                        | replace("{{ action }}", action_word_sk)
-                        | replace("{{ name }}", matched_alias) }}
-                    language: "{{ tts_lang }}"
-                  target:
-                    entity_id: tts.google_en_com  # použije sa fallback engine
+          - service: "{{ notify_service }}"
+            data:
+              message: >-
+                {{ notify_template
+                  | replace("{{ action }}", action_word_sk)
+                  | replace("{{ name }}", matched_alias) }}
+              title: "Zámok ovládaný hlasom"
 
       - alias: Ak sa nenašiel zámok
         conditions:
           - condition: template
             value_template: "{{ matched_entity | length == 0 }}"
         sequence:
-          - repeat:
-              for_each: "{{ tts_players }}"
-              sequence:
-                - service: tts.speak
-                  data:
-                    cache: true
-                    media_player_entity_id: "{{ repeat.item }}"
-                    message: "Zámok s názvom {{ requested_name }} sa nenašiel."
-                    language: "{{ tts_lang }}"
-                  target:
-                    entity_id: tts.google_en_com
+          - service: "{{ notify_service }}"
+            data:
+              message: "Zámok s názvom {{ requested_name }} sa nenašiel."
+              title: "Zámok neidentifikovaný"
 
 mode: single
