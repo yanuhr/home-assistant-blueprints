@@ -1,67 +1,56 @@
 blueprint:
-  name: Hlasové ovládanie zámkov (notifikácia)
+  name: Ovládanie zámkov hlasom (priamy príkaz)
   description: >
-    Ovládanie smart zámkov cez hlasový príkaz typu "zamkni/odomkni <alias>"
-    s notifikačným potvrdením cez notify službu (napr. notify.mobile_app_iphone).
+    Ovládanie zámkov na základe konkrétnych hlasových príkazov cez Siri / CarPlay.
+    Reaguje na presné znenie príkazu (napr. "zamkni zadné dvere") a vykoná akciu + pošle notifikáciu.
   domain: automation
   input:
-    lock_aliases:
-      name: Zámky a aliasy
+    command_map:
+      name: Príkazy a zámky
       description: >
-        Zoznam názvov, ktoré používateľ vyslovuje (napr. "garáž") a im priradené entity zámkov.
-        Príklad: { "garáž": "lock.garazovy_zamok", "predné dvere": "lock.predne_dvere" }
+        Zoznam: príkaz → zámok + akcia.
+        Príklad:
+          "zamkni garáž": { entity_id: "lock.zamok_garaz", action: "lock" }
+          "odomkni garáž": { entity_id: "lock.zamok_garaz", action: "unlock" }
       selector:
         object: {}
 
     notify_service:
       name: Notifikačná služba
       description: >
-        Vyber službu pre odoslanie notifikácie (napr. notify.mobile_app_iphone_jan).
+        Napr. notify.mobile_app_iphone_jan
       selector:
         text: {}
 
     notify_template:
-      name: Text správy
+      name: Šablóna správy
       description: >
-        Šablóna textu notifikácie. Použi {{ action }} a {{ name }}.
-      default: "Zámok {{ name }} bol úspešne {{ action }}."
+        Použi {{ command }}, {{ entity }}, {{ action }}
+      default: "Príkaz '{{ command }}' vykonal akciu '{{ action }}' na zámku {{ entity }}."
       selector:
         text: {}
 
 trigger:
   - platform: conversation
-    command:
-      - zamkni {name}
-      - odomkni {name}
+    command: []
 
 variables:
-  lock_aliases: !input lock_aliases
+  command_map: !input command_map
   notify_service: !input notify_service
   notify_template: !input notify_template
 
-  requested_name: "{{ trigger.slots.name | lower }}"
-  action_type: >-
-    {% if 'zamkni' in trigger.command.lower() %}lock
-    {% elif 'odomkni' in trigger.command.lower() %}unlock
-    {% else %}unknown{% endif %}
-  matched_entity: "{{ lock_aliases.get(requested_name) }}"
-  matched_alias: "{{ requested_name }}"
-  action_word_sk: >-
-    {% if action_type == 'lock' %}zamknutý
-    {% elif action_type == 'unlock' %}odomknutý
-    {% else %}neznámy{% endif %}
+  received_command: "{{ trigger.command | lower }}"
+  matched_entry: "{{ command_map.get(received_command) }}"
+  matched_entity: "{{ matched_entry.entity_id if matched_entry is mapping else none }}"
+  matched_action: "{{ matched_entry.action if matched_entry is mapping else none }}"
 
 action:
   - choose:
-      - alias: Ak sa našiel zámok
-        conditions:
+      - conditions:
           - condition: template
-            value_template: "{{ matched_entity is not none }}"
+            value_template: "{{ matched_entity is not none and matched_action in ['lock','unlock'] }}"
         sequence:
-          - service: >-
-              {% if action_type == 'lock' %}lock.lock
-              {% elif action_type == 'unlock' %}lock.unlock
-              {% endif %}
+          - service: "lock.{{ matched_action }}"
             target:
               entity_id: "{{ matched_entity }}"
 
@@ -70,17 +59,17 @@ action:
               title: "Zámok ovládaný hlasom"
               message: >-
                 {{ notify_template
-                  | replace("{{ action }}", action_word_sk)
-                  | replace("{{ name }}", matched_alias) }}
+                  | replace("{{ command }}", received_command)
+                  | replace("{{ entity }}", matched_entity)
+                  | replace("{{ action }}", matched_action) }}
 
-      - alias: Ak sa nenašiel zámok
-        conditions:
+      - conditions:
           - condition: template
             value_template: "{{ matched_entity is none }}"
         sequence:
           - service: "{{ notify_service }}"
             data:
-              title: "Zámok neidentifikovaný"
-              message: "Zámok s názvom {{ requested_name }} sa nenašiel."
+              title: "Zámok neznámy"
+              message: "Zámok pre príkaz '{{ received_command }}' sa nenašiel."
 
 mode: single
