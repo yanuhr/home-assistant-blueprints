@@ -33,7 +33,7 @@ blueprint:
 trigger:
   - platform: conversation
     command:
-      - zamkni garáž  # placeholder – reálne príkazy sa mapujú v command_map
+      - _placeholder_command_
 
 variables:
   command_map: !input command_map
