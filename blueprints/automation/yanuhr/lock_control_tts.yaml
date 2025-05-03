@@ -2,7 +2,7 @@ blueprint:
   name: Hlasové ovládanie zámkov (notifikácia)
   description: >
     Ovládanie smart zámkov cez hlasový príkaz typu "zamkni/odomkni <alias>"
-    s notifikačným potvrdením cez notify službu (napr. iPhone).
+    s notifikačným potvrdením cez notify službu (napr. notify.mobile_app_iphone).
   domain: automation
   input:
     lock_aliases:
@@ -41,28 +41,22 @@ variables:
 
   requested_name: "{{ trigger.slots.name | lower }}"
   action_type: >-
-    {% if 'zamkni' in trigger.command.lower() %}lock{% elif 'odomkni' in trigger.command.lower() %}unlock{% else %}unknown{% endif %}
-  matched_entity: >-
-    {% for k, v in lock_aliases.items() %}
-      {% if k | lower == requested_name %}
-        {{ v }}
-      {% endif %}
-    {% endfor %}
-  matched_alias: >-
-    {% for k, v in lock_aliases.items() %}
-      {% if k | lower == requested_name %}
-        {{ k }}
-      {% endif %}
-    {% endfor %}
+    {% if 'zamkni' in trigger.command.lower() %}lock
+    {% elif 'odomkni' in trigger.command.lower() %}unlock
+    {% else %}unknown{% endif %}
+  matched_entity: "{{ lock_aliases.get(requested_name) }}"
+  matched_alias: "{{ requested_name }}"
   action_word_sk: >-
-    {% if action_type == 'lock' %}zamknutý{% elif action_type == 'unlock' %}odomknutý{% else %}neznámy{% endif %}
+    {% if action_type == 'lock' %}zamknutý
+    {% elif action_type == 'unlock' %}odomknutý
+    {% else %}neznámy{% endif %}
 
 action:
   - choose:
       - alias: Ak sa našiel zámok
         conditions:
           - condition: template
-            value_template: "{{ matched_entity | length > 0 }}"
+            value_template: "{{ matched_entity is not none }}"
         sequence:
           - service: >-
               {% if action_type == 'lock' %}lock.lock
@@ -70,22 +64,23 @@ action:
               {% endif %}
             target:
               entity_id: "{{ matched_entity }}"
+
           - service: "{{ notify_service }}"
             data:
+              title: "Zámok ovládaný hlasom"
               message: >-
                 {{ notify_template
                   | replace("{{ action }}", action_word_sk)
                   | replace("{{ name }}", matched_alias) }}
-              title: "Zámok ovládaný hlasom"
 
       - alias: Ak sa nenašiel zámok
         conditions:
           - condition: template
-            value_template: "{{ matched_entity | length == 0 }}"
+            value_template: "{{ matched_entity is none }}"
         sequence:
           - service: "{{ notify_service }}"
             data:
-              message: "Zámok s názvom {{ requested_name }} sa nenašiel."
               title: "Zámok neidentifikovaný"
+              message: "Zámok s názvom {{ requested_name }} sa nenašiel."
 
 mode: single
