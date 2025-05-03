@@ -2,7 +2,7 @@ blueprint:
   name: Ovládanie zámkov hlasom (priamy príkaz)
   description: >
     Ovládanie zámkov na základe konkrétnych hlasových príkazov cez Siri / CarPlay.
-    Reaguje na presné znenie príkazu (napr. "zamkni zadné dvere") a vykoná akciu + pošle notifikáciu.
+    Reaguje na presné znenie príkazu (napr. "zamkni garáž") a vykoná akciu + pošle notifikáciu.
   domain: automation
   input:
     command_map:
@@ -32,7 +32,8 @@ blueprint:
 
 trigger:
   - platform: conversation
-    command: []
+    command:
+      - zamkni garáž  # placeholder – reálne príkazy sa mapujú v command_map
 
 variables:
   command_map: !input command_map
@@ -46,7 +47,8 @@ variables:
 
 action:
   - choose:
-      - conditions:
+      - alias: Ak sa našiel zámok
+        conditions:
           - condition: template
             value_template: "{{ matched_entity is not none and matched_action in ['lock','unlock'] }}"
         sequence:
@@ -63,7 +65,8 @@ action:
                   | replace("{{ entity }}", matched_entity)
                   | replace("{{ action }}", matched_action) }}
 
-      - conditions:
+      - alias: Ak sa nenašiel zámok
+        conditions:
           - condition: template
             value_template: "{{ matched_entity is none }}"
         sequence:
