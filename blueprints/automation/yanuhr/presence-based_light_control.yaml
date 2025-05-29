@@ -31,7 +31,6 @@ blueprint:
     window_cover:
       name: Roleta (voliteľné)
       description: Vyberte roletu, ktorá musí byť zatvorená pre zapnutie svetla
-      required: false
       selector:
         entity:
           domain: cover
@@ -41,7 +40,6 @@ blueprint:
       description: >
         Zadajte názvy notifikačných služieb pre debug výstup.
         Môžete zadať viacero služieb, každú na nový riadok.
-      required: false
       default: []
       selector:
         text:
