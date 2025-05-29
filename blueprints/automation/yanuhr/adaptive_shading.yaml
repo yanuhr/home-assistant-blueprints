@@ -165,11 +165,9 @@ action:
                           message: >-
                             Rolety v miestnosti {{ name }} sa nezatiahnu, pretože je otvorené okno.
                             Po jeho zatvorení sa roleta automaticky zatiahne o 30 sekúnd.
-                - wait_template:
-                    template: "{{ window_sensor == '' or is_state(window_sensor, 'off') }}"
-                    timeout:
-                      minutes: 5
-                    continue_on_timeout: false
+                - wait_template: "{{ window_sensor == '' or is_state(window_sensor, 'off') }}"
+                  timeout: "00:05:00"
+                  continue_on_timeout: false
                 - delay:
                     seconds: 30
                 - service: logbook.log
