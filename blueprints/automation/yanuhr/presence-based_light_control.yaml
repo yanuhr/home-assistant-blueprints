@@ -209,4 +209,17 @@ action:
                         title: "Spoľahlivé osvetlenie"
                         message: "Svetlo zhasnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}"
 
+      default:
+        - service: logbook.log
+          data:
+            name: "Spoľahlivé osvetlenie"
+            message: "Žiadna podmienka nebola splnená – žiadna akcia nebola vykonaná."
+        - repeat:
+            for_each: "{{ notification_services }}"
+            sequence:
+              - service: "{{ repeat.item }}"
+                data:
+                  title: "Spoľahlivé osvetlenie"
+                  message: "Automatizácia sa spustila, ale žiadna podmienka nebola splnená."
+
 mode: restart
