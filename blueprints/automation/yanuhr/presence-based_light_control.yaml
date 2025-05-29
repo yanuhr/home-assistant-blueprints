@@ -1,0 +1,166 @@
+blueprint:
+  name: Spoľahlivé osvetlenie pomocou FP2 + PIR
+  description: >
+    Automatické ovládanie osvetlenia na základe detekcie prítomnosti pomocou Aqara FP2
+    a PIR senzora. Vyžaduje súčasnú detekciu oboma senzormi pre zapnutie a
+    nepretržitú absenciu detekcie pre vypnutie.
+
+  domain: automation
+  input:
+    fp2_sensor:
+      name: FP2 senzor prítomnosti
+      description: Vyberte Aqara FP2 senzor prítomnosti
+      selector:
+        entity:
+          domain: binary_sensor
+
+    pir_sensor:
+      name: PIR senzor pohybu
+      description: Vyberte PIR senzor pohybu
+      selector:
+        entity:
+          domain: binary_sensor
+
+    target_light:
+      name: Ovládané svetlo
+      description: Vyberte svetlo, ktoré sa má ovládať
+      selector:
+        entity:
+          domain: light
+
+    window_cover:
+      name: Roleta (voliteľné)
+      description: Vyberte roletu, ktorá musí byť zatvorená pre zapnutie svetla
+      required: false
+      selector:
+        entity:
+          domain: cover
+
+    notification_services:
+      name: Notifikačné služby (voliteľné)
+      description: >
+        Zadajte názvy notifikačných služieb pre debug výstup.
+        Môžete zadať viacero služieb, každú na nový riadok.
+      required: false
+      default: []
+      selector:
+        text:
+          multiple: true
+
+    vypinacie_oneskorenie:
+      name: Oneskorenie vypnutia
+      description: Čas v sekundách po ktorom sa svetlo zhasne
+      default: 180
+      selector:
+        number:
+          min: 10
+          max: 3600
+          step: 1
+          unit_of_measurement: s
+
+    allow_time_start:
+      name: Začiatok povoleného intervalu
+      description: Čas začiatku povoleného intervalu (napr. 06:00:00)
+      default: "06:00:00"
+      selector:
+        time: {}
+
+    allow_time_end:
+      name: Koniec povoleného intervalu
+      description: Čas konca povoleného intervalu (napr. 23:30:00)
+      default: "23:30:00"
+      selector:
+        time: {}
+
+    throttle_helper:
+      name: Pomocná entita pre throttling
+      description: Vyberte input_datetime entitu pre ukladanie času posledného zapnutia
+      selector:
+        entity:
+          domain: input_datetime
+
+trigger:
+  - platform: state
+    entity_id: !input fp2_sensor
+  - platform: state
+    entity_id: !input pir_sensor
+  - platform: time_pattern
+    seconds: /30
+
+variables:
+  fp2_sensor_id: !input fp2_sensor
+  pir_sensor_id: !input pir_sensor
+  target_light_id: !input target_light
+  window_cover_id: !input window_cover
+  notification_services: !input notification_services
+  vypinacie_oneskorenie: !input vypinacie_oneskorenie
+  allow_time_start: !input allow_time_start
+  allow_time_end: !input allow_time_end
+  throttle_helper_id: !input throttle_helper
+  current_time: "{{ now().strftime('%H:%M:%S') }}"
+  is_allowed_time: "{{ current_time >= allow_time_start and current_time <= allow_time_end }}"
+  fp2_detected: "{{ is_state(fp2_sensor_id, 'on') }}"
+  pir_detected: "{{ is_state(pir_sensor_id, 'on') }}"
+  light_is_off: "{{ is_state(target_light_id, 'off') }}"
+  window_is_closed: "{{ (window_cover_id | default('')) == '' or is_state(window_cover_id, 'closed') }}"
+  last_trigger_time: "{{ states(throttle_helper_id) }}"
+  time_since_last_trigger: "{{ (as_timestamp(now()) - as_timestamp(last_trigger_time)) | float(0) }}"
+  can_trigger: "{{ time_since_last_trigger > 20 }}"
+
+condition:
+  - condition: template
+    value_template: "{{ is_allowed_time }}"
+
+action:
+  - choose:
+      # Logika zapnutia
+      - conditions:
+          - condition: template
+            value_template: "{{ fp2_detected and pir_detected and light_is_off and window_is_closed and can_trigger }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: "{{ target_light_id }}"
+          - service: input_datetime.set_datetime
+            data:
+              entity_id: "{{ throttle_helper_id }}"
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+          - service: logbook.log
+            data:
+              name: "Spoľahlivé osvetlenie"
+              message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}, Roleta: {{ window_is_closed }}"
+          - repeat:
+              for_each: "{{ notification_services }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  data:
+                    title: "Spoľahlivé osvetlenie"
+                    message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}, Roleta: {{ window_is_closed }}"
+
+      # Logika vypnutia
+      - conditions:
+          - condition: template
+            value_template: "{{ not fp2_detected and not pir_detected }}"
+        sequence:
+          - delay:
+              seconds: "{{ vypinacie_oneskorenie }}"
+          - if:
+              - condition: template
+                value_template: "{{ not fp2_detected and not pir_detected }}"
+            then:
+              - service: light.turn_off
+                target:
+                  entity_id: "{{ target_light_id }}"
+              - service: logbook.log
+                data:
+                  name: "Spoľahlivé osvetlenie"
+                  message: "Svetlo zhasnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}"
+              - repeat:
+                  for_each: "{{ notification_services }}"
+                  sequence:
+                    - service: "{{ repeat.item }}"
+                      data:
+                        title: "Spoľahlivé osvetlenie"
+                        message: "Svetlo zhasnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}"
+
+mode: restart
