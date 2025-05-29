@@ -113,7 +113,6 @@ condition:
 
 action:
   - choose:
-      # Logika zapnutia pri zatváraní rolety
       - conditions:
           - condition: template
             value_template: "{{ window_is_closing and fp2_detected and light_is_off }}"
@@ -137,7 +136,6 @@ action:
                     title: "Spoľahlivé osvetlenie"
                     message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, Roleta: zatvára sa"
 
-      # Logika zapnutia (pôvodná)
       - conditions:
           - condition: template
             value_template: "{{ fp2_detected and pir_detected and light_is_off and window_is_closed and can_trigger }}"
@@ -161,7 +159,6 @@ action:
                     title: "Spoľahlivé osvetlenie"
                     message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}, Roleta: {{ window_is_closed }}"
 
-      # Logika vypnutia pri otvorenej rolete
       - conditions:
           - condition: template
             value_template: "{{ window_is_open and not light_is_off }}"
@@ -183,7 +180,6 @@ action:
                     title: "Spoľahlivé osvetlenie"
                     message: "Svetlo zhasnuté - Roleta: otvorená"
 
-      # Logika vypnutia (pôvodná)
       - conditions:
           - condition: template
             value_template: "{{ not fp2_detected and not pir_detected }}"
@@ -208,6 +204,7 @@ action:
                       data:
                         title: "Spoľahlivé osvetlenie"
                         message: "Svetlo zhasnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}"
+
     default:
       - service: logbook.log
         data:
