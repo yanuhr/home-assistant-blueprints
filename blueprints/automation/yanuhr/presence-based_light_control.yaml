@@ -3,7 +3,8 @@ blueprint:
   description: >
     Automatické ovládanie osvetlenia na základe detekcie prítomnosti pomocou Aqara FP2
     a PIR senzora. Vyžaduje súčasnú detekciu oboma senzormi pre zapnutie a
-    nepretržitú absenciu detekcie pre vypnutie.
+    nepretržitú absenciu detekcie pre vypnutie. Zohľadňuje stav rolety a zabezpečuje,
+    že svetlo nezostane zapnuté, ak v miestnosti nikto nie je.
 
   domain: automation
   input:
@@ -100,6 +101,7 @@ variables:
   fp2_detected: "{{ is_state(fp2_sensor_id, 'on') }}"
   pir_detected: "{{ is_state(pir_sensor_id, 'on') }}"
   light_is_off: "{{ is_state(target_light_id, 'off') }}"
+  light_is_on: "{{ is_state(target_light_id, 'on') }}"
   window_is_closed: "{{ (window_cover_id | default('')) == '' or is_state(window_cover_id, 'closed') }}"
   window_is_closing: "{{ (window_cover_id | default('')) != '' and is_state(window_cover_id, 'closing') }}"
   window_is_open: "{{ (window_cover_id | default('')) != '' and is_state(window_cover_id, 'open') }}"
@@ -161,7 +163,7 @@ action:
 
       - conditions:
           - condition: template
-            value_template: "{{ window_is_open and not light_is_off }}"
+            value_template: "{{ window_is_open and light_is_on }}"
         sequence:
           - delay:
               seconds: 2
@@ -182,13 +184,13 @@ action:
 
       - conditions:
           - condition: template
-            value_template: "{{ not fp2_detected and not pir_detected }}"
+            value_template: "{{ not fp2_detected and not pir_detected and light_is_on }}"
         sequence:
           - delay:
               seconds: "{{ vypinacie_oneskorenie }}"
           - if:
               - condition: template
-                value_template: "{{ not fp2_detected and not pir_detected }}"
+                value_template: "{{ not fp2_detected and not pir_detected and light_is_on }}"
             then:
               - service: light.turn_off
                 target:
@@ -196,14 +198,14 @@ action:
               - service: logbook.log
                 data:
                   name: "Spoľahlivé osvetlenie"
-                  message: "Svetlo zhasnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}"
+                  message: "Svetlo zhasnuté - nikto nie je prítomný"
               - repeat:
                   for_each: "{{ notification_services }}"
                   sequence:
                     - service: "{{ repeat.item }}"
                       data:
                         title: "Spoľahlivé osvetlenie"
-                        message: "Svetlo zhasnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}"
+                        message: "Svetlo zhasnuté - nikto nie je prítomný"
 
     default:
       - service: logbook.log
