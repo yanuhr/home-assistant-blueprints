@@ -101,6 +101,8 @@ variables:
   pir_detected: "{{ is_state(pir_sensor_id, 'on') }}"
   light_is_off: "{{ is_state(target_light_id, 'off') }}"
   window_is_closed: "{{ (window_cover_id | default('')) == '' or is_state(window_cover_id, 'closed') }}"
+  window_is_closing: "{{ (window_cover_id | default('')) != '' and is_state(window_cover_id, 'closing') }}"
+  window_is_open: "{{ (window_cover_id | default('')) != '' and is_state(window_cover_id, 'open') }}"
   last_trigger_time: "{{ states(throttle_helper_id) }}"
   time_since_last_trigger: "{{ (as_timestamp(now()) - as_timestamp(last_trigger_time)) | float(0) }}"
   can_trigger: "{{ time_since_last_trigger > 20 }}"
@@ -111,7 +113,31 @@ condition:
 
 action:
   - choose:
-      # Logika zapnutia
+      # Logika zapnutia pri zatváraní rolety
+      - conditions:
+          - condition: template
+            value_template: "{{ window_is_closing and fp2_detected and light_is_off }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: "{{ target_light_id }}"
+          - service: input_datetime.set_datetime
+            data:
+              entity_id: "{{ throttle_helper_id }}"
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+          - service: logbook.log
+            data:
+              name: "Spoľahlivé osvetlenie"
+              message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, Roleta: zatvára sa"
+          - repeat:
+              for_each: "{{ notification_services }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  data:
+                    title: "Spoľahlivé osvetlenie"
+                    message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, Roleta: zatvára sa"
+
+      # Logika zapnutia (pôvodná)
       - conditions:
           - condition: template
             value_template: "{{ fp2_detected and pir_detected and light_is_off and window_is_closed and can_trigger }}"
@@ -135,7 +161,29 @@ action:
                     title: "Spoľahlivé osvetlenie"
                     message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}, Roleta: {{ window_is_closed }}"
 
-      # Logika vypnutia
+      # Logika vypnutia pri otvorenej rolete
+      - conditions:
+          - condition: template
+            value_template: "{{ window_is_open and not light_is_off }}"
+        sequence:
+          - delay:
+              seconds: 2
+          - service: light.turn_off
+            target:
+              entity_id: "{{ target_light_id }}"
+          - service: logbook.log
+            data:
+              name: "Spoľahlivé osvetlenie"
+              message: "Svetlo zhasnuté - Roleta: otvorená"
+          - repeat:
+              for_each: "{{ notification_services }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  data:
+                    title: "Spoľahlivé osvetlenie"
+                    message: "Svetlo zhasnuté - Roleta: otvorená"
+
+      # Logika vypnutia (pôvodná)
       - conditions:
           - condition: template
             value_template: "{{ not fp2_detected and not pir_detected }}"
