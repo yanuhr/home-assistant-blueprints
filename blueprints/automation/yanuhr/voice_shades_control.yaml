@@ -22,14 +22,14 @@ blueprint:
           - cover.obyvacka
       selector:
         object: {}
-    tts_player:
-      name: TTS prehrávač (voliteľné)
-      description: Media_player pre TTS hlášky
-      default: ""
+    tts_players:
+      name: TTS prehrávače
+      description: Vyberte všetky prehrávače, ktoré môžu prijímať TTS výstup.
+      default: []
       selector:
         entity:
           domain: media_player
-          multiple: false
+          multiple: true
     location_aliases:
       name: Aliasy lokalít (voliteľné)
       description: >
@@ -85,17 +85,15 @@ variables:
     {# Vždy vráť zoznam (aj pre jeden prvok) #}
     {% if covers_raw is string %}[{{ covers_raw }}]{% else %}{{ covers_raw }}{% endif %}
   covers_count: "{{ covers | count }}"
-  tts_player: !input tts_player
+  tts_players: !input tts_players
   # Dynamické určenie prehrávača podľa Assist Satellite
-  matched_entity: >-
-    {% set satellites = states.media_player | selectattr('attributes.assist_pipeline_state', 'defined') | selectattr('attributes.assist_pipeline_state', 'eq', 'processing') | list %}
-    {% if satellites|length > 0 %}
-      {{ satellites[0].entity_id }}
-    {% elif tts_player %}
-      {{ tts_player }}
-    {% else %}
-      ''
-    {% endif %}
+  matched_entities: >-
+    {% set satellites = states.media_player
+      | selectattr('attributes.assist_pipeline_state', 'defined')
+      | selectattr('attributes.assist_pipeline_state', 'eq', 'processing')
+      | map(attribute='entity_id') | list %}
+    {% set intersection = tts_players | select('in', satellites) | list %}
+    {{ intersection if intersection else tts_players }}
   tts_location: >-
     {% if normalized_location in covers_map and normalized_location not in ['všetky','vsetky'] %}
       {{ normalized_location }}
@@ -127,15 +125,13 @@ action:
           - service: cover.open_cover
             target:
               entity_id: "{{ covers }}"
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ matched_entity != '' }}"
-                sequence:
-                  - service: tts.google_translate_say
-                    data:
-                      entity_id: "{{ matched_entity }}"
-                      message: "{{ tts_sentence }}"
+          - repeat:
+              for_each: "{{ matched_entities }}"
+              sequence:
+                - service: tts.google_translate_say
+                  data:
+                    entity_id: "{{ repeat.item }}"
+                    message: "{{ tts_sentence }}"
       - conditions:
           - condition: template
             value_template: "{{ action == 'zatvor' }}"
@@ -143,24 +139,20 @@ action:
           - service: cover.close_cover
             target:
               entity_id: "{{ covers }}"
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ matched_entity != '' }}"
-                sequence:
-                  - service: tts.google_translate_say
-                    data:
-                      entity_id: "{{ matched_entity }}"
-                      message: "{{ tts_sentence }}"
+          - repeat:
+              for_each: "{{ matched_entities }}"
+              sequence:
+                - service: tts.google_translate_say
+                  data:
+                    entity_id: "{{ repeat.item }}"
+                    message: "{{ tts_sentence }}"
     default:
-      - choose:
-          - conditions:
-              - condition: template
-                value_template: "{{ matched_entity != '' }}"
-            sequence:
-              - service: tts.google_translate_say
-                data:
-                  entity_id: "{{ matched_entity }}"
-                  message: "Neznáma lokalita alebo príkaz. Skúste znova."
+      - repeat:
+          for_each: "{{ matched_entities }}"
+          sequence:
+            - service: tts.google_translate_say
+              data:
+                entity_id: "{{ repeat.item }}"
+                message: "Neznáma lokalita alebo príkaz. Skúste znova."
 
 mode: single
