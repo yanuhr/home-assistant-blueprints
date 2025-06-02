@@ -1,7 +1,7 @@
 blueprint:
   name: Hlasové ovládanie roliet (SK)
   description: >
-    Ovládanie roliet hlasom cez príkazy typu "otvor/zatvor (roletu/rolety/žalúzie) (v miestnosti/všetky)".
+    Ovládanie roliet hlasom cez príkazy typu "otvor/zatvor (roletu/rolety/žalúzie/závesy) (v miestnosti/všetky)".
     Podporuje dynamické mapovanie lokalít, aliasy a TTS výstup.
     Príklad pre aliasy lokalít (location_aliases):
       spálňa u mamy:
@@ -45,15 +45,21 @@ blueprint:
 
 trigger:
   - platform: conversation
-    command: "(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*) (v .+|vo .+|na .+|u .+|všetky|vsetky)"
+    command: "(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*|záves[y]*) (v .+|vo .+|na .+|u .+|všetky|vsetky)"
 
 variables:
   command_text: "{{ trigger.text | lower }}"
   action: >-
     {% set match = command_text | regex_search('^(otvor|zatvor)') %}
     {{ match if match else '' }}
+  object_type: >-
+    {% set obj = command_text | regex_search('^(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*|záves[y]*)') %}
+    {% if obj is not none %}
+      {% set typ = obj.split(' ')[1] %}
+      {% if 'rolet' in typ %}roleta{% elif 'žalúz' in typ %}žalúzie{% elif 'záves' in typ %}závesy{% else %}roleta{% endif %}
+    {% else %}roleta{% endif %}
   location: >-
-    {% set loc = command_text | regex_replace('^(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*) ', '') %}
+    {% set loc = command_text | regex_replace('^(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*|záves[y]*) ', '') %}
     {{ loc | trim }}
   covers_map: !input covers_map
   location_aliases: !input location_aliases
@@ -98,16 +104,18 @@ variables:
     {% if normalized_location in covers_map and normalized_location not in ['všetky','vsetky'] %}
       {{ normalized_location }}
     {% elif 'všetky' in normalized_location or 'vsetky' in normalized_location %}
-      všetky rolety
+      všetky {{ object_type }}
     {% else %}
       neznáma lokalita
     {% endif %}
-  # Zjednodušený výber správnej vety pre TTS
+  # Zjednodušený výber správnej vety pre TTS podľa typu objektu
   tts_sentence: >-
+    {% set obj = object_type %}
+    {% set loc = tts_location %}
     {% if covers_count == 1 and action in ['otvor', 'zatvor'] %}
-      Roleta v {{ tts_location }} bola {% if action == 'otvor' %}otvorená{% else %}zatvorená{% endif %}.
+      {% if obj == 'roleta' %}Roleta{% elif obj == 'žalúzie' %}Žalúzia{% elif obj == 'závesy' %}Záves{% else %}Zariadenie{% endif %} v {{ loc }} bol{% if action == 'otvor' %} otvorený{% else %} zatvorený{% endif %}.
     {% elif covers_count > 1 and action in ['otvor', 'zatvor'] %}
-      Rolety v {{ tts_location }} boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
+      {% if obj == 'roleta' %}Rolety{% elif obj == 'žalúzie' %}Žalúzie{% elif obj == 'závesy' %}Závesy{% else %}Zariadenia{% endif %} v {{ loc }} boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
     {% else %}
       ''
     {% endif %}
