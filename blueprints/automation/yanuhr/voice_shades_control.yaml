@@ -1,0 +1,166 @@
+blueprint:
+  name: Hlasové ovládanie roliet (SK)
+  description: >
+    Ovládanie roliet hlasom cez príkazy typu "otvor/zatvor (roletu/rolety/žalúzie) (v miestnosti/všetky)".
+    Podporuje dynamické mapovanie lokalít, aliasy a TTS výstup.
+    Príklad pre aliasy lokalít (location_aliases):
+      spálňa u mamy:
+        - maminá spálňa
+        - u mamy v spálni
+        - v spálni u mami
+  domain: automation
+  input:
+    covers_map:
+      name: Mapa lokalít na entity roliet
+      description: >
+        Zadajte dictionary, kde kľúč je názov lokality (napr. "spálňa") a hodnota je entity_id alebo zoznam entity_id roliet.
+        Príklad:
+        spálňa: cover.spalna
+        obývačka: cover.obyvacka
+        všetky:
+          - cover.spalna
+          - cover.obyvacka
+      selector:
+        object: {}
+    tts_player:
+      name: TTS prehrávač (voliteľné)
+      description: Media_player pre TTS hlášky
+      default: ""
+      selector:
+        entity:
+          domain: media_player
+          multiple: false
+    location_aliases:
+      name: Aliasy lokalít (voliteľné)
+      description: >
+        Zadajte dictionary, kde kľúč je hlavný názov lokality (napr. "spálňa u mamy") a hodnota je zoznam aliasov (napr. ["maminá spálňa", "u mamy v spálni", "v spálni u mami"]).
+        YAML príklad:
+          spálňa u mamy:
+            - maminá spálňa
+            - u mamy v spálni
+            - v spálni u mami
+      default: {}
+      selector:
+        object: {}
+
+trigger:
+  - platform: conversation
+    command: "(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*) (v .+|vo .+|na .+|u .+|všetky|vsetky)"
+
+variables:
+  command_text: "{{ trigger.text | lower }}"
+  action: >-
+    {% set match = command_text | regex_search('^(otvor|zatvor)') %}
+    {{ match if match else '' }}
+  location: >-
+    {% set loc = command_text | regex_replace('^(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*) ', '') %}
+    {{ loc | trim }}
+  covers_map: !input covers_map
+  location_aliases: !input location_aliases
+  # Optimalizovaný alias lookup s early exit
+  normalized_location: >-
+    {% set loc = location %}
+    {% if loc not in covers_map and location_aliases %}
+      {% set found = namespace(val=loc) %}
+      {% for main, aliases in location_aliases.items() if not found.val in covers_map %}
+        {% if loc in aliases %}
+          {% set found.val = main %}
+          {% break %}
+        {% endif %}
+      {% endfor %}
+      {{ found.val }}
+    {% else %}
+      {{ loc }}
+    {% endif %}
+  # Rozdelená logika výberu covers pre čitateľnosť
+  covers_raw: >-
+    {% if normalized_location in covers_map %}
+      {{ covers_map[normalized_location] }}
+    {% elif 'všetky' in normalized_location or 'vsetky' in normalized_location %}
+      {{ covers_map.get('všetky', covers_map.get('vsetky', [])) }}
+    {% else %}
+      []
+    {% endif %}
+  covers: >-
+    {# Vždy vráť zoznam (aj pre jeden prvok) #}
+    {% if covers_raw is string %}[{{ covers_raw }}]{% else %}{{ covers_raw }}{% endif %}
+  covers_count: "{{ covers | count }}"
+  tts_player: !input tts_player
+  # Dynamické určenie prehrávača podľa Assist Satellite
+  matched_entity: >-
+    {% set satellites = states.media_player | selectattr('attributes.assist_pipeline_state', 'defined') | selectattr('attributes.assist_pipeline_state', 'eq', 'processing') | list %}
+    {% if satellites|length > 0 %}
+      {{ satellites[0].entity_id }}
+    {% elif tts_player %}
+      {{ tts_player }}
+    {% else %}
+      ''
+    {% endif %}
+  tts_location: >-
+    {% if normalized_location in covers_map and normalized_location not in ['všetky','vsetky'] %}
+      {{ normalized_location }}
+    {% elif 'všetky' in normalized_location or 'vsetky' in normalized_location %}
+      všetky rolety
+    {% else %}
+      neznáma lokalita
+    {% endif %}
+  # Zjednodušený výber správnej vety pre TTS
+  tts_sentence: >-
+    {% if covers_count == 1 and action in ['otvor', 'zatvor'] %}
+      Roleta v {{ tts_location }} bola {% if action == 'otvor' %}otvorená{% else %}zatvorená{% endif %}.
+    {% elif covers_count > 1 and action in ['otvor', 'zatvor'] %}
+      Rolety v {{ tts_location }} boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
+    {% else %}
+      ''
+    {% endif %}
+
+condition:
+  - condition: template
+    value_template: "{{ action in ['otvor', 'zatvor'] and covers_count > 0 }}"
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ action == 'otvor' }}"
+        sequence:
+          - service: cover.open_cover
+            target:
+              entity_id: "{{ covers }}"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ matched_entity != '' }}"
+                sequence:
+                  - service: tts.google_translate_say
+                    data:
+                      entity_id: "{{ matched_entity }}"
+                      message: "{{ tts_sentence }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ action == 'zatvor' }}"
+        sequence:
+          - service: cover.close_cover
+            target:
+              entity_id: "{{ covers }}"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ matched_entity != '' }}"
+                sequence:
+                  - service: tts.google_translate_say
+                    data:
+                      entity_id: "{{ matched_entity }}"
+                      message: "{{ tts_sentence }}"
+    default:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ matched_entity != '' }}"
+            sequence:
+              - service: tts.google_translate_say
+                data:
+                  entity_id: "{{ matched_entity }}"
+                  message: "Neznáma lokalita alebo príkaz. Skúste znova."
+
+mode: single
