@@ -8,16 +8,23 @@ blueprint:
 
   domain: automation
   input:
-    fp2_sensor:
-      name: FP2 senzor prítomnosti
-      description: Vyberte Aqara FP2 senzor prítomnosti
+    zone1_sensor:
+      name: FP2 senzor prítomnosti (zóna 1)
+      description: Vyberte Aqara FP2 senzor prítomnosti pre hlavnú zónu miestnosti
+      selector:
+        entity:
+          domain: binary_sensor
+
+    interference_zone_sensor:
+      name: FP2 senzor prítomnosti (interferenčná zóna)
+      description: Vyberte Aqara FP2 senzor prítomnosti pre interferenčnú zónu
       selector:
         entity:
           domain: binary_sensor
 
     pir_sensor:
-      name: PIR senzor pohybu
-      description: Vyberte PIR senzor pohybu
+      name: PIR senzor pohybu (voliteľné)
+      description: Vyberte PIR senzor pohybu pre potvrdenie prítomnosti v interferenčnej zóne
       selector:
         entity:
           domain: binary_sensor
@@ -49,10 +56,21 @@ blueprint:
     vypinacie_oneskorenie:
       name: Oneskorenie vypnutia
       description: Čas v sekundách po ktorom sa svetlo zhasne
-      default: 180
+      default: 60
       selector:
         number:
           min: 10
+          max: 3600
+          step: 1
+          unit_of_measurement: s
+
+    interference_timeout:
+      name: Timeout pre interferenčnú zónu
+      description: Čas v sekundách po ktorom sa interferenčná zóna považuje za falošnú detekciu
+      default: 300
+      selector:
+        number:
+          min: 60
           max: 3600
           step: 1
           unit_of_measurement: s
@@ -71,43 +89,37 @@ blueprint:
       selector:
         time: {}
 
-    throttle_helper:
-      name: Pomocná entita pre throttling
-      description: Vyberte input_datetime entitu pre ukladanie času posledného zapnutia
-      selector:
-        entity:
-          domain: input_datetime
-
 trigger:
   - platform: state
-    entity_id: !input fp2_sensor
+    entity_id: !input zone1_sensor
   - platform: state
-    entity_id: !input pir_sensor
+    entity_id: !input interference_zone_sensor
   - platform: time_pattern
     seconds: /30
 
 variables:
-  fp2_sensor_id: !input fp2_sensor
+  zone1_sensor_id: !input zone1_sensor
+  interference_zone_sensor_id: !input interference_zone_sensor
   pir_sensor_id: !input pir_sensor
   target_light_id: !input target_light
   window_cover_id: !input window_cover
   notification_services: !input notification_services
   vypinacie_oneskorenie: !input vypinacie_oneskorenie
+  interference_timeout: !input interference_timeout
   allow_time_start: !input allow_time_start
   allow_time_end: !input allow_time_end
-  throttle_helper_id: !input throttle_helper
   current_time: "{{ now().strftime('%H:%M:%S') }}"
   is_allowed_time: "{{ current_time >= allow_time_start and current_time <= allow_time_end }}"
-  fp2_detected: "{{ is_state(fp2_sensor_id, 'on') }}"
-  pir_detected: "{{ is_state(pir_sensor_id, 'on') }}"
+  zone1_detected: "{{ is_state(zone1_sensor_id, 'on') }}"
+  interference_detected: "{{ is_state(interference_zone_sensor_id, 'on') }}"
+  pir_detected: "{{ pir_sensor_id is not none and is_state(pir_sensor_id, 'on') }}"
   light_is_off: "{{ is_state(target_light_id, 'off') }}"
   light_is_on: "{{ is_state(target_light_id, 'on') }}"
   window_is_closed: "{{ (window_cover_id | default('')) == '' or is_state(window_cover_id, 'closed') }}"
   window_is_closing: "{{ (window_cover_id | default('')) != '' and is_state(window_cover_id, 'closing') }}"
   window_is_open: "{{ (window_cover_id | default('')) != '' and is_state(window_cover_id, 'open') }}"
-  last_trigger_time: "{{ states(throttle_helper_id) }}"
-  time_since_last_trigger: "{{ (as_timestamp(now()) - as_timestamp(last_trigger_time)) | float(0) }}"
-  can_trigger: "{{ time_since_last_trigger > 20 }}"
+  valid_presence: "{{ (zone1_detected and not interference_detected) or (interference_detected and pir_detected) }}"
+  interference_timeout_reached: "{{ interference_detected and not zone1_detected and (as_timestamp(now()) - as_timestamp(states[interference_zone_sensor_id].last_changed)) > interference_timeout }}"
 
 condition:
   - condition: template
@@ -117,49 +129,41 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ window_is_closing and fp2_detected and light_is_off }}"
+            value_template: "{{ window_is_closing and zone1_detected and light_is_off }}"
         sequence:
           - service: light.turn_on
             target:
               entity_id: "{{ target_light_id }}"
-          - service: input_datetime.set_datetime
-            data:
-              entity_id: "{{ throttle_helper_id }}"
-              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
           - service: logbook.log
             data:
               name: "Spoľahlivé osvetlenie"
-              message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, Roleta: zatvára sa"
+              message: "Svetlo zapnuté - Zóna 1: {{ zone1_detected }}, Roleta: zatvára sa"
           - repeat:
               for_each: "{{ notification_services }}"
               sequence:
                 - service: "{{ repeat.item }}"
                   data:
                     title: "Spoľahlivé osvetlenie"
-                    message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, Roleta: zatvára sa"
+                    message: "Svetlo zapnuté - Zóna 1: {{ zone1_detected }}, Roleta: zatvára sa"
 
       - conditions:
           - condition: template
-            value_template: "{{ fp2_detected and pir_detected and light_is_off and window_is_closed and can_trigger }}"
+            value_template: "{{ valid_presence and light_is_off and window_is_closed }}"
         sequence:
           - service: light.turn_on
             target:
               entity_id: "{{ target_light_id }}"
-          - service: input_datetime.set_datetime
-            data:
-              entity_id: "{{ throttle_helper_id }}"
-              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
           - service: logbook.log
             data:
               name: "Spoľahlivé osvetlenie"
-              message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}, Roleta: {{ window_is_closed }}"
+              message: "Svetlo zapnuté - Validná prítomnosť: {{ valid_presence }}, Roleta: {{ window_is_closed }}"
           - repeat:
               for_each: "{{ notification_services }}"
               sequence:
                 - service: "{{ repeat.item }}"
                   data:
                     title: "Spoľahlivé osvetlenie"
-                    message: "Svetlo zapnuté - FP2: {{ fp2_detected }}, PIR: {{ pir_detected }}, Roleta: {{ window_is_closed }}"
+                    message: "Svetlo zapnuté - Validná prítomnosť: {{ valid_presence }}, Roleta: {{ window_is_closed }}"
 
       - conditions:
           - condition: template
@@ -184,13 +188,14 @@ action:
 
       - conditions:
           - condition: template
-            value_template: "{{ not fp2_detected and not pir_detected and light_is_on }}"
+            value_template: "{{ (not valid_presence or interference_timeout_reached) and light_is_on }}"
         sequence:
-          - delay:
-              seconds: "{{ vypinacie_oneskorenie }}"
+          - wait_template: "{{ valid_presence and not interference_timeout_reached }}"
+            timeout: "{{ vypinacie_oneskorenie }}"
+            continue_on_timeout: true
           - if:
               - condition: template
-                value_template: "{{ not fp2_detected and not pir_detected and light_is_on }}"
+                value_template: "{{ not valid_presence or interference_timeout_reached }}"
             then:
               - service: light.turn_off
                 target:
@@ -198,14 +203,14 @@ action:
               - service: logbook.log
                 data:
                   name: "Spoľahlivé osvetlenie"
-                  message: "Svetlo zhasnuté - nikto nie je prítomný"
+                  message: "Svetlo zhasnuté - {{ 'timeout interferenčnej zóny' if interference_timeout_reached else 'žiadna validná prítomnosť' }}"
               - repeat:
                   for_each: "{{ notification_services }}"
                   sequence:
                     - service: "{{ repeat.item }}"
                       data:
                         title: "Spoľahlivé osvetlenie"
-                        message: "Svetlo zhasnuté - nikto nie je prítomný"
+                        message: "Svetlo zhasnuté - {{ 'timeout interferenčnej zóny' if interference_timeout_reached else 'žiadna validná prítomnosť' }}"
 
     default:
       - service: logbook.log
