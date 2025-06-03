@@ -42,9 +42,7 @@ variables:
   action: >-
     {% if 'zatvor' in command_text %}zatvor{% elif 'otvor' in command_text %}otvor{% else %}''{% endif %}
 
-  covers: >-
-    {% set all_key = covers_map.keys() | select('match', '^v[šs]etk[ayie]*$') | list | first %}
-    {% if all_key %}{{ covers_map[all_key] }}{% else %}[] {% endif %}
+  covers: "{{ covers_map['všetky'] if 'všetky' in covers_map else [] }}"
 
   covers_count: "{{ covers | count }}"
 
