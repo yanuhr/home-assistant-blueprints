@@ -50,11 +50,7 @@ blueprint:
 trigger:
   - platform: conversation
     command: >-
-      (otvor|zatvor) (
-        (všetky|vsetky) \s (rolet[auy]*|žalúzi[euay]*|záves[y]*)
-        |
-        (rolet[auy]*|žalúzi[euay]*|záves[y]*) \s (v .+|vo .+|na .+|u .+)
-      )
+      (otvor|zatvor) (všetky|vsetky)? ?(rolet[auy]*|žalúzi[euay]*|záves[y]*)?( v .+| vo .+| na .+| u .+)?
 
 variables:
   command_text: "{{ trigger.text | lower }}"
@@ -68,7 +64,7 @@ variables:
       {% if 'rolet' in typ %}roleta{% elif 'žalúz' in typ %}žalúzie{% elif 'záves' in typ %}závesy{% else %}roleta{% endif %}
     {% else %}roleta{% endif %}
   location: >-
-    {% set loc = command_text | regex_replace('^(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*|záves[y]*) ', '') %}
+    {% set loc = command_text | regex_replace('^(otvor|zatvor) (všetky|vsetky)? ?(rolet[auy]*|žalúzi[euay]*|záves[y]*)? ', '') %}
     {{ loc | trim }}
   covers_map: !input covers_map
   location_aliases: !input location_aliases
