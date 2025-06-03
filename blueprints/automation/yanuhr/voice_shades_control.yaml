@@ -1,22 +1,15 @@
 blueprint:
   name: Hlasové ovládanie roliet (SK)
   description: >
-    Ovládanie roliet hlasom cez príkazy typu "otvor/zatvor (roletu/rolety/žalúzie/závesy) (v miestnosti/všetky)".
-    Podporuje dynamické mapovanie lokalít, aliasy a TTS výstup.
-    Príklad pre aliasy lokalít (location_aliases):
-      spálňa u mamy:
-        - maminá spálňa
-        - u mamy v spálni
-        - v spálni u mami
+    Ovládanie roliet hlasom cez príkazy typu "otvor/zatvor všetky rolety".
+    Podporuje TTS výstup.
   domain: automation
   input:
     covers_map:
       name: Mapa lokalít na entity roliet
       description: >
-        Zadajte dictionary, kde kľúč je názov lokality (napr. "spálňa") a hodnota je entity_id alebo zoznam entity_id roliet.
+        Zadajte dictionary, kde kľúč je názov lokality (napr. "všetky") a hodnota je entity_id alebo zoznam entity_id roliet.
         Príklad:
-        spálňa: cover.spalna
-        obývačka: cover.obyvacka
         všetky:
           - cover.spalna
           - cover.obyvacka
@@ -30,74 +23,26 @@ blueprint:
         entity:
           domain: media_player
           multiple: true
-    location_aliases:
-      name: Aliasy lokalít (voliteľné)
-      description: >
-        Zadajte dictionary, kde kľúč je hlavný názov lokality (napr. "spálňa u mamy") a hodnota je zoznam aliasov (napr. ["maminá spálňa", "u mamy v spálni", "v spálni u mami"]).
-        YAML príklad:
-          spálňa u mamy:
-            - maminá spálňa
-            - u mamy v spálni
-            - v spálni u mami
-      default: {}
-      selector:
-        object: {}
 
-# Podporované formáty príkazov:
-# - "(otvor|zatvor) všetky (roletu|žalúzie|závesy)"
-# - "(otvor|zatvor) (roletu|žalúzie|závesy) (v|vo|na|u) [lokalita]"
-# Blueprint má reagovať iba ak je lokalita uvedená, buď priamo, alebo cez aliasy. Príkazy bez miestnosti nemajú byť spustené.
 trigger:
   - platform: conversation
     command: >-
-      (otvor|zatvor) (všetky|vsetky)? ?(rolet[auy]*|žalúzi[euay]*|záves[y]*)?( v .+| vo .+| na .+| u .+)?
+      (otvor|zatvor) (všetky|vsetky) (rolet[auy]*|žalúzi[euay]*|záves[y]*)
 
 variables:
   command_text: "{{ trigger.text | lower }}"
   action: >-
     {% set match = command_text | regex_search('^(otvor|zatvor)') %}
     {{ match if match else '' }}
-  object_type: >-
-    {% set obj = command_text | regex_search('(rolet[auy]*|žalúzi[euay]*|záves[y]*)') %}
-    {% if obj is not none %}
-      {% set typ = obj %}
-      {% if 'rolet' in typ %}roleta{% elif 'žalúz' in typ %}žalúzie{% elif 'záves' in typ %}závesy{% else %}roleta{% endif %}
-    {% else %}roleta{% endif %}
-  location: >-
-    {% set loc = command_text | regex_replace('^(otvor|zatvor) (všetky|vsetky)? ?(rolet[auy]*|žalúzi[euay]*|záves[y]*)? ', '') %}
-    {{ loc | trim }}
   covers_map: !input covers_map
-  location_aliases: !input location_aliases
-  # Optimalizovaný alias lookup s early exit
-  normalized_location: >-
-    {% set loc = location %}
-    {% if loc not in covers_map and location_aliases %}
-      {% set found = namespace(val=loc) %}
-      {% for main, aliases in location_aliases.items() if not found.val in covers_map %}
-        {% if loc in aliases %}
-          {% set found.val = main %}
-          {% break %}
-        {% endif %}
-      {% endfor %}
-      {{ found.val }}
-    {% else %}
-      {{ loc }}
-    {% endif %}
-  # Rozdelená logika výberu covers pre čitateľnosť
-  covers_raw: >-
-    {% if normalized_location in covers_map %}
-      {{ covers_map[normalized_location] }}
-    {% elif 'všetky' in normalized_location or 'vsetky' in normalized_location %}
-      {{ covers_map.get('všetky', covers_map.get('vsetky', [])) }}
+  covers: >-
+    {% if 'všetky' in covers_map %}
+      {{ covers_map['všetky'] }}
     {% else %}
       []
     {% endif %}
-  covers: >-
-    {# Vždy vráť zoznam (aj pre jeden prvok) #}
-    {% if covers_raw is string %}[{{ covers_raw }}]{% else %}{{ covers_raw }}{% endif %}
   covers_count: "{{ covers | count }}"
   tts_players: !input tts_players
-  # Dynamické určenie prehrávača podľa Assist Satellite
   matched_entities: >-
     {% set satellites = states.media_player
       | selectattr('attributes.assist_pipeline_state', 'defined')
@@ -105,22 +50,9 @@ variables:
       | map(attribute='entity_id') | list %}
     {% set intersection = tts_players | select('in', satellites) | list %}
     {{ intersection if intersection else tts_players }}
-  tts_location: >-
-    {% if normalized_location in covers_map and normalized_location not in ['všetky','vsetky'] %}
-      {{ normalized_location }}
-    {% elif 'všetky' in normalized_location or 'vsetky' in normalized_location %}
-      všetky {{ object_type }}
-    {% else %}
-      neznáma lokalita
-    {% endif %}
-  # Zjednodušený výber správnej vety pre TTS podľa typu objektu
   tts_sentence: >-
-    {% set obj = object_type %}
-    {% set loc = tts_location %}
-    {% if covers_count == 1 and action in ['otvor', 'zatvor'] %}
-      {% if obj == 'roleta' %}Roleta{% elif obj == 'žalúzie' %}Žalúzia{% elif obj == 'závesy' %}Záves{% else %}Zariadenie{% endif %} v {{ loc }} bol{% if action == 'otvor' %} otvorený{% else %} zatvorený{% endif %}.
-    {% elif covers_count > 1 and action in ['otvor', 'zatvor'] %}
-      {% if obj == 'roleta' %}Rolety{% elif obj == 'žalúzie' %}Žalúzie{% elif obj == 'závesy' %}Závesy{% else %}Zariadenia{% endif %} v {{ loc }} boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
+    {% if covers_count > 0 and action in ['otvor', 'zatvor'] %}
+      Všetky rolety boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
     {% else %}
       ''
     {% endif %}
