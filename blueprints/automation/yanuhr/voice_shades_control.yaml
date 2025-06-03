@@ -1,28 +1,21 @@
 blueprint:
   name: Hlasové ovládanie roliet (SK)
   description: >
-    Ovládanie roliet hlasom cez príkazy typu "otvor všetky rolety" alebo "zatvor všetky rolety".
-    Podporuje TTS výstup.
+    Ovládanie všetkých roliet hlasom cez príkazy ako „zatvor všetky rolety“ alebo „otvor všetky rolety“.
+    Automaticky zistí aktívny Assist Satellite a prehrá TTS výstup len na ňom.
   domain: automation
+
   input:
     covers_map:
-      name: Mapa všetkých roliet
+      name: Všetky rolety
       description: >
-        Zadajte dictionary, kde kľúč je názov "všetky" a hodnota je entity_id alebo zoznam entity_id roliet.
+        Zoznam entít roliet, ktoré sa majú ovládať spoločne.
         Príklad:
         všetky:
           - cover.spalna
           - cover.obyvacka
       selector:
         object: {}
-    tts_players:
-      name: TTS prehrávače
-      description: Vyberte všetky prehrávače, ktoré môžu prijímať TTS výstup.
-      default: []
-      selector:
-        entity:
-          domain: media_player
-          multiple: true
 
 trigger:
   - platform: conversation
@@ -32,71 +25,58 @@ trigger:
       - "otvor vsetky rolety"
       - "zatvor vsetky rolety"
 
-variables:
-  command_text: "{{ trigger.text | lower }}"
-  action: >-
-    {% if 'zatvor' in command_text %}zatvor{% elif 'otvor' in command_text %}otvor{% else %}''{% endif %}
-  covers_map: !input covers_map
-  covers: >-
-    {% set all_key = covers_map.keys() | select('match', '^v[šs]etk[ayie]*$') | list | first %}
-    {% if all_key %}{{ covers_map[all_key] }}{% else %}[]{% endif %}
-  covers_count: "{{ covers | count }}"
-  tts_players: !input tts_players
-  matched_entities: >-
-    {% set satellites = states.media_player
-      | selectattr('attributes.assist_pipeline_state', 'defined')
-      | selectattr('attributes.assist_pipeline_state', 'eq', 'processing')
-      | map(attribute='entity_id') | list %}
-    {% set intersection = tts_players | select('in', satellites) | list %}
-    {{ intersection if intersection else tts_players }}
-  tts_sentence: >-
-    {% if covers_count > 0 and action in ['otvor', 'zatvor'] %}
-      Všetky rolety boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
-    {% else %}
-      ''
-    {% endif %}
-
-condition:
-  - condition: template
-    value_template: "{{ action in ['otvor', 'zatvor'] and covers_count > 0 }}"
-
 action:
+  - variables:
+      command_text: "{{ trigger.text | lower }}"
+      action: >-
+        {% if 'zatvor' in command_text %}zatvor{% elif 'otvor' in command_text %}otvor{% else %}''{% endif %}
+
+      # Nájde kľúč "všetky" vo covers_map bez ohľadu na diakritiku
+      covers: >-
+        {% set all_key = covers_map.keys() | select('match', '^v[šs]etk[ayie]*$') | list | first %}
+        {% if all_key %}{{ covers_map[all_key] }}{% else %}[]{% endif %}
+
+      covers_count: "{{ covers | count }}"
+
+      # Zistí Assist Satellite s atribútom 'processing'
+      matched_entity: >-
+        {% set entities = states.media_player | selectattr('attributes.assist_pipeline_state', 'defined') | selectattr('attributes.assist_pipeline_state', 'eq', 'processing') | map(attribute='entity_id') | list %}
+        {{ entities[0] if entities|length > 0 else '' }}
+
+      # Správa pre TTS
+      tts_sentence: >-
+        {% if covers_count > 0 and action in ['otvor', 'zatvor'] %}
+          Všetky rolety boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
+        {% else %}
+          Neznámy príkaz alebo chýbajúce rolety.
+        {% endif %}
+
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ action == 'otvor' }}"
+            value_template: "{{ action == 'otvor' and covers_count > 0 }}"
         sequence:
           - service: cover.open_cover
             target:
               entity_id: "{{ covers }}"
-          - repeat:
-              for_each: "{{ matched_entities }}"
-              sequence:
-                - service: tts.google_translate_say
-                  data:
-                    entity_id: "{{ repeat.item }}"
-                    message: "{{ tts_sentence }}"
+
       - conditions:
           - condition: template
-            value_template: "{{ action == 'zatvor' }}"
+            value_template: "{{ action == 'zatvor' and covers_count > 0 }}"
         sequence:
           - service: cover.close_cover
             target:
               entity_id: "{{ covers }}"
-          - repeat:
-              for_each: "{{ matched_entities }}"
-              sequence:
-                - service: tts.google_translate_say
-                  data:
-                    entity_id: "{{ repeat.item }}"
-                    message: "{{ tts_sentence }}"
-    default:
-      - repeat:
-          for_each: "{{ matched_entities }}"
-          sequence:
-            - service: tts.google_translate_say
-              data:
-                entity_id: "{{ repeat.item }}"
-                message: "Neznámy príkaz alebo chýbajúce rolety."
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ matched_entity != '' }}"
+        sequence:
+          - service: assist_satellite.announce
+            target:
+              entity_id: "{{ matched_entity }}"
+            data:
+              message: "{{ tts_sentence }}"
 
 mode: single
