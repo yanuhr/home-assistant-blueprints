@@ -65,7 +65,8 @@ variables:
 
 condition:
   - condition: template
-    value_template: "{{ action in ['otvor', 'zatvor'] and covers_count | int(0) > 0 }}"
+    value_template: >
+      {{ action in ['otvor', 'zatvor'] and covers is iterable and covers | length > 0 }}
 
 action:
   - choose:
