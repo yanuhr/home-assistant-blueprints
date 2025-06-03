@@ -1,14 +1,14 @@
 blueprint:
   name: Hlasové ovládanie roliet (SK)
   description: >
-    Ovládanie roliet hlasom cez príkazy typu "otvor/zatvor všetky rolety".
+    Ovládanie roliet hlasom cez príkazy typu "otvor všetky rolety" alebo "zatvor všetky rolety".
     Podporuje TTS výstup.
   domain: automation
   input:
     covers_map:
-      name: Mapa lokalít na entity roliet
+      name: Mapa všetkých roliet
       description: >
-        Zadajte dictionary, kde kľúč je názov lokality (napr. "všetky") a hodnota je entity_id alebo zoznam entity_id roliet.
+        Zadajte dictionary, kde kľúč je názov "všetky" a hodnota je entity_id alebo zoznam entity_id roliet.
         Príklad:
         všetky:
           - cover.spalna
@@ -26,8 +26,11 @@ blueprint:
 
 trigger:
   - platform: conversation
-    command: >-
-      (otvor|zatvor) (všetky|vsetky) (rolet[auy]*|žalúzi[euay]*|záves[y]*)
+    command:
+      - "otvor všetky rolety"
+      - "zatvor všetky rolety"
+      - "otvor vsetky rolety"
+      - "zatvor vsetky rolety"
 
 variables:
   command_text: "{{ trigger.text | lower }}"
