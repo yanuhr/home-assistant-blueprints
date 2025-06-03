@@ -57,7 +57,7 @@ variables:
     {{ intersection[0] if intersection|length > 0 else (tts_players[0] if tts_players|length > 0 else '') }}
 
   tts_sentence: >-
-    {% if covers_count > 0 and action in ['otvor', 'zatvor'] %}
+    {% if covers_count | int(0) > 0 and action in ['otvor', 'zatvor'] %}
       Všetky rolety boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
     {% else %}
       Neznámy príkaz alebo chýbajúce rolety.
@@ -65,7 +65,7 @@ variables:
 
 condition:
   - condition: template
-    value_template: "{{ action in ['otvor', 'zatvor'] and covers_count > 0 }}"
+    value_template: "{{ action in ['otvor', 'zatvor'] and covers_count | int(0) > 0 }}"
 
 action:
   - choose:
