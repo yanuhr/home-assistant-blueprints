@@ -1,39 +1,30 @@
 blueprint:
   name: Hlasové ovládanie roliet (SK)
   description: >
-    Ovládanie roliet hlasom cez príkazy typu "otvor/zatvor všetky rolety".
-    Podporuje TTS výstup.
+    Ovládanie všetkých roliet cez intent script. Očakáva premennú `action` s hodnotou "otvor" alebo "zatvor".
+    Automatizácia sa nespustí, ak nie je zadaná akcia alebo nie sú definované žiadne rolety.
   domain: automation
   input:
     covers_map:
-      name: Mapa lokalít na entity roliet
+      name: Mapa roliet
       description: >
-        Zadajte dictionary, kde kľúč je názov lokality (napr. "všetky") a hodnota je entity_id alebo zoznam entity_id roliet.
-        Príklad:
-        všetky:
-          - cover.spalna
-          - cover.obyvacka
+        Zadajte dictionary, kde kľúč je "všetky" a hodnota je zoznam entity_id roliet.
       selector:
         object: {}
     tts_players:
       name: TTS prehrávače
-      description: Vyberte všetky prehrávače, ktoré môžu prijímať TTS výstup.
+      description: Vyberte prehrávače pre spätnú väzbu.
       default: []
       selector:
         entity:
           domain: media_player
           multiple: true
 
-trigger:
-  - platform: conversation
-    command: >-
-      (otvor|zatvor) (všetky|vsetky) (rolet[auy]*|žalúzi[euay]*|záves[y]*)
+# Automatizácia nemá trigger – spúšťa sa cez intent_script.
+trigger: []
 
 variables:
-  command_text: "{{ trigger.text | lower }}"
-  action: >-
-    {% set match = command_text | regex_search('^(otvor|zatvor)') %}
-    {{ match if match else '' }}
+  action: "{{ action | default('') }}"
   covers_map: !input covers_map
   covers: >-
     {% if 'všetky' in covers_map %}
