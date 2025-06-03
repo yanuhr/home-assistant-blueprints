@@ -35,15 +35,16 @@ trigger:
       - "zatvor vsetky rolety"
 
 variables:
-  covers_map: !input covers_map
-  tts_players: !input tts_players
+  covers_map: >
+    {% set input = namespace(val=[]) %}
+    {% set input.val = iif(is_defined(blueprint_inputs.covers_map), blueprint_inputs.covers_map, {}) %}
+    {{ input.val }}
 
+  tts_players: !input tts_players
   command_text: "{{ trigger.text | lower }}"
   action: >-
     {% if 'zatvor' in command_text %}zatvor{% elif 'otvor' in command_text %}otvor{% else %}''{% endif %}
-
   covers: "{{ covers_map['všetky'] if 'všetky' in covers_map else [] }}"
-
   matched_entity: >-
     {% set entities = states.media_player
       | selectattr('attributes.assist_pipeline_state', 'defined')
@@ -51,10 +52,8 @@ variables:
       | map(attribute='entity_id') | list %}
     {% set intersection = tts_players | select('in', entities) | list %}
     {{ intersection[0] if intersection | length > 0 else (tts_players[0] if tts_players | length > 0 else '') }}
-
   tts_sentence: >-
-    {% set count = covers | count %}
-    {% if count > 0 and action in ['otvor', 'zatvor'] %}
+    {% if covers | count > 0 and action in ['otvor', 'zatvor'] %}
       Všetky rolety boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
     {% else %}
       Neznámy príkaz alebo chýbajúce rolety.
@@ -62,9 +61,14 @@ variables:
 
 condition:
   - condition: template
-    value_template: "{{ action in ['otvor', 'zatvor'] and (covers | count) > 0 }}"
+    value_template: "{{ action in ['otvor', 'zatvor'] and covers | count > 0 }}"
 
 action:
+  - service: system_log.write
+    data:
+      level: info
+      message: "DEBUG | action={{ action }} | covers={{ covers }} | covers_map={{ covers_map }}"
+
   - choose:
       - conditions:
           - condition: template
