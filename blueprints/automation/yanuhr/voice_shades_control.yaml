@@ -1,37 +1,42 @@
 blueprint:
   name: Hlasové ovládanie roliet (SK)
   description: >
-    Ovládanie všetkých roliet cez intent script. Očakáva premennú `action` s hodnotou "otvor" alebo "zatvor".
-    Automatizácia sa nespustí, ak nie je zadaná akcia alebo nie sú definované žiadne rolety.
+    Ovládanie roliet hlasom cez príkazy typu "otvor/zatvor všetky rolety".
+    Podporuje TTS výstup.
   domain: automation
   input:
     covers_map:
-      name: Mapa roliet
+      name: Mapa lokalít na entity roliet
       description: >
-        Zadajte dictionary, kde kľúč je "všetky" a hodnota je zoznam entity_id roliet.
+        Zadajte dictionary, kde kľúč je názov lokality (napr. "všetky") a hodnota je entity_id alebo zoznam entity_id roliet.
+        Príklad:
+        všetky:
+          - cover.spalna
+          - cover.obyvacka
       selector:
         object: {}
     tts_players:
       name: TTS prehrávače
-      description: Vyberte prehrávače pre spätnú väzbu.
+      description: Vyberte všetky prehrávače, ktoré môžu prijímať TTS výstup.
       default: []
       selector:
         entity:
           domain: media_player
           multiple: true
 
-# Automatizácia nemá trigger – spúšťa sa cez intent_script.
-trigger: []
+trigger:
+  - platform: conversation
+    command: >-
+      (otvor|zatvor) (všetky|vsetky) (rolet[auy]*|žalúzi[euay]*|záves[y]*)
 
 variables:
-  action: "{{ action | default('') }}"
+  command_text: "{{ trigger.text | lower }}"
+  action: >-
+    {% if 'zatvor' in command_text %}zatvor{% elif 'otvor' in command_text %}otvor{% else %}''{% endif %}
   covers_map: !input covers_map
   covers: >-
-    {% if 'všetky' in covers_map %}
-      {{ covers_map['všetky'] }}
-    {% else %}
-      []
-    {% endif %}
+    {% set all_key = covers_map.keys() | select('match', '^v[šs]etk[ayie]*$') | list | first %}
+    {% if all_key %}{{ covers_map[all_key] }}{% else %}[]{% endif %}
   covers_count: "{{ covers | count }}"
   tts_players: !input tts_players
   matched_entities: >-
@@ -89,6 +94,6 @@ action:
             - service: tts.google_translate_say
               data:
                 entity_id: "{{ repeat.item }}"
-                message: "Neznáma lokalita alebo príkaz. Skúste znova."
+                message: "Neznámy príkaz alebo chýbajúce rolety."
 
 mode: single
