@@ -43,9 +43,18 @@ blueprint:
       selector:
         object: {}
 
+# Podporované formáty príkazov:
+# - "(otvor|zatvor) všetky (roletu|žalúzie|závesy)"
+# - "(otvor|zatvor) (roletu|žalúzie|závesy) (v|vo|na|u) [lokalita]"
+# Blueprint má reagovať iba ak je lokalita uvedená, buď priamo, alebo cez aliasy. Príkazy bez miestnosti nemajú byť spustené.
 trigger:
   - platform: conversation
-    command: "(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*|záves[y]*) (v .+|vo .+|na .+|u .+|všetky|vsetky)"
+    command: >-
+      (otvor|zatvor) (
+        (všetky|vsetky) \s (rolet[auy]*|žalúzi[euay]*|záves[y]*)
+        |
+        (rolet[auy]*|žalúzi[euay]*|záves[y]*) \s (v .+|vo .+|na .+|u .+)
+      )
 
 variables:
   command_text: "{{ trigger.text | lower }}"
@@ -53,9 +62,9 @@ variables:
     {% set match = command_text | regex_search('^(otvor|zatvor)') %}
     {{ match if match else '' }}
   object_type: >-
-    {% set obj = command_text | regex_search('^(otvor|zatvor) (rolet[auy]*|žalúzi[euay]*|záves[y]*)') %}
+    {% set obj = command_text | regex_search('(rolet[auy]*|žalúzi[euay]*|záves[y]*)') %}
     {% if obj is not none %}
-      {% set typ = obj.split(' ')[1] %}
+      {% set typ = obj %}
       {% if 'rolet' in typ %}roleta{% elif 'žalúz' in typ %}žalúzie{% elif 'záves' in typ %}závesy{% else %}roleta{% endif %}
     {% else %}roleta{% endif %}
   location: >-
