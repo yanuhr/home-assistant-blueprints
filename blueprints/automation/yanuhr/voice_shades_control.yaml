@@ -44,18 +44,17 @@ variables:
 
   covers: "{{ covers_map['všetky'] if 'všetky' in covers_map else [] }}"
 
-  covers_count: "{{ covers | count }}"
-
   matched_entity: >-
     {% set entities = states.media_player
       | selectattr('attributes.assist_pipeline_state', 'defined')
       | selectattr('attributes.assist_pipeline_state', 'eq', 'processing')
       | map(attribute='entity_id') | list %}
     {% set intersection = tts_players | select('in', entities) | list %}
-    {{ intersection[0] if intersection|length > 0 else (tts_players[0] if tts_players|length > 0 else '') }}
+    {{ intersection[0] if intersection | length > 0 else (tts_players[0] if tts_players | length > 0 else '') }}
 
   tts_sentence: >-
-    {% if covers_count | int(0) > 0 and action in ['otvor', 'zatvor'] %}
+    {% set count = covers | count %}
+    {% if count > 0 and action in ['otvor', 'zatvor'] %}
       Všetky rolety boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
     {% else %}
       Neznámy príkaz alebo chýbajúce rolety.
@@ -63,8 +62,7 @@ variables:
 
 condition:
   - condition: template
-    value_template: >
-      {{ action in ['otvor', 'zatvor'] and covers is iterable and covers | length > 0 }}
+    value_template: "{{ action in ['otvor', 'zatvor'] and (covers | count) > 0 }}"
 
 action:
   - choose:
