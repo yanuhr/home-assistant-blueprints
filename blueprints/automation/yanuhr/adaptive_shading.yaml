@@ -39,9 +39,11 @@ blueprint:
       selector:
         object: {}
 
+initial_state: true
+
 trigger:
-  - platform: time
-    at: !input morning_trigger_time
+  - platform: time_pattern
+    minutes: "/1"
 
   - platform: numeric_state
     entity_id: !input lux_sensor
@@ -60,8 +62,16 @@ trigger:
     offset: "-00:30:00"
 
 condition:
-  - condition: time
-    after: !input morning_trigger_time
+  - condition: template
+    value_template: >
+      {% set current_time = now().strftime('%H:%M:%S') %}
+      {% set morning_time = morning_trigger_time %}
+      {% set end_time = (strptime(morning_trigger_time, '%H:%M:%S') + timedelta(minutes=5)).strftime('%H:%M:%S') %}
+      {% if current_time >= morning_time and current_time <= end_time %}
+        true
+      {% else %}
+        false
+      {% endif %}
   - condition: sun
     before: sunset
 
@@ -74,10 +84,12 @@ action:
       after_sunset: "{{ state_attr('sun.sun', 'elevation') | float(1) < 0 }}"
       notification_services: !input notification_services
       morning_trigger_time: !input morning_trigger_time
-      is_morning: "{{ now().strftime('%H:%M:%S') >= morning_trigger_time }}"
+      current_time: "{{ now().strftime('%H:%M:%S') }}"
+      end_time: "{{ (strptime(morning_trigger_time, '%H:%M:%S') + timedelta(minutes=5)).strftime('%H:%M:%S') }}"
+      is_morning_window: "{{ current_time >= morning_trigger_time and current_time <= end_time }}"
       is_bright: "{{ lux > 800 }}"
       is_dark: "{{ lux < 600 }}"
-      is_daytime: "{{ is_morning and not after_sunset }}"
+      is_daytime: "{{ is_morning_window and not after_sunset }}"
 
   - repeat:
       for_each: "{{ rooms }}"
