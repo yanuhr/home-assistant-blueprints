@@ -1,0 +1,121 @@
+blueprint:
+  name: Upozornenie na výmenu filtra v čističke vzduchu
+  description: >
+    Automaticky upozorňuje na potrebu výmeny filtra v čističke vzduchu.
+    Podporuje viacero senzorov a notifikačných služieb.
+
+  domain: automation
+  input:
+    filter_sensors:
+      name: Senzory filtra
+      description: Vyberte senzory filtra, ktoré chcete monitorovať
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+
+    notification_services:
+      name: Notifikačné služby
+      description: >
+        Zadajte názvy notifikačných služieb (napr. notify.mobile_app_iphone_jan).
+        Môžete zadať viacero služieb, každú na nový riadok.
+      default: []
+      selector:
+        text:
+          multiple: true
+
+    notification_time:
+      name: Čas notifikácie
+      description: Kedy sa má notifikácia odosielať (raz denne)
+      default: "08:00:00"
+      selector:
+        time: {}
+
+    memory_helper:
+      name: Memory Helper
+      description: Entita input_text na ukladanie už notifikovaných senzorov
+      selector:
+        entity:
+          domain: input_text
+
+trigger:
+  - platform: state
+    entity_id: !input filter_sensors
+    from: "off"
+    to: "on"
+
+  - platform: time
+    at: !input notification_time
+
+condition:
+  - condition: template
+    value_template: >
+      {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | list %}
+      {{ active_sensors | length > 0 }}
+
+action:
+  - variables:
+      filter_sensors: !input filter_sensors
+      notification_services: !input notification_services
+      memory_helper: !input memory_helper
+      already_notified: >
+        {% if states(memory_helper) != '' %}
+          {{ states(memory_helper).split(',') | map('trim') | list }}
+        {% else %}
+          {{ [] }}
+        {% endif %}
+      triggered_sensors: >
+        {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list %}
+        {{ active_sensors }}
+      new_notifications: >
+        {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list %}
+        {% set not_notified = active_sensors | reject('in', already_notified) | list %}
+        {{ not_notified }}
+      filter_locations: >
+        {% set locations = [] %}
+        {% for sensor in new_notifications %}
+          {% if 'replace_filter' in sensor %}
+            {% set room = area_name(sensor) | default('Neznáma miestnosť') %}
+            {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
+            {% set locations = locations + [room ~ " – " ~ name] %}
+          {% endif %}
+        {% endfor %}
+        {{ locations | list }}
+
+  - if:
+      - condition: template
+        value_template: "{{ notification_services | length > 0 and filter_locations | length > 0 }}"
+    then:
+      - repeat:
+          for_each: "{{ notification_services }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              data:
+                title: "Výmena filtra čističky vzduchu"
+                message: >
+                  {% if filter_locations | length == 1 %}
+                    {{ filter_locations[0] }}: Vymeň filter v čističke vzduchu!
+                  {% else %}
+                    Vymeň filter v týchto čističkách: {{ filter_locations | join(', ') }}
+                  {% endif %}
+
+      - service: input_text.set_value
+        data:
+          entity_id: "{{ memory_helper }}"
+          value: >
+            {% set updated_list = already_notified + new_notifications %}
+            {{ updated_list | unique | join(',') }}
+
+  - if:
+      - condition: template
+        value_template: "{{ trigger is defined and trigger.platform == 'state' and trigger.to_state.state == 'off' }}"
+    then:
+      - service: input_text.set_value
+        data:
+          entity_id: "{{ memory_helper }}"
+          value: >
+            {% set filtered_list = already_notified | reject('eq', trigger.entity_id) | list %}
+            {{ filtered_list | join(',') }}
+
+mode: queued
+max: 10

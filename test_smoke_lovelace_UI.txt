@@ -1,0 +1,17 @@
+type: custom:vertical-stack-in-card
+cards:
+  - type: custom:mushroom-title-card
+    title: 🧪 Testovanie detektorov dymu
+
+  - type: custom:decluttering-card
+    template: test_smoke_detector_card
+    variables:
+      - entity_id: binary_sensor.dym_kuchyna
+      - test_result: input_text.test_result_dym_kuchyna
+      - test_time: input_text.test_timestamp_dym_kuchyna
+  - type: custom:decluttering-card
+    template: test_smoke_detector_card
+    variables:
+      - entity_id: binary_sensor.dym_spalna
+      - test_result: input_text.test_result_dym_spalna
+      - test_time: input_text.test_timestamp_dym_spalna

@@ -1,0 +1,28 @@
+alias: Adaptívne tienenie - viac miestností (zdieľaný svetelný senzor)
+description: ""
+use_blueprint:
+  path: yanuhr/adaptive_shading.yaml
+  input:
+    lux_sensor: sensor.senzor_osvetlenia_exterier
+    morning_trigger_time: "07:30:00"
+    notification_services:
+      - notify.mobile_app_iphone_mama
+      - notify.mobile_app_iphone_jan
+    room_config:
+      - name: Obývačka
+        window_sensor: binary_sensor.okno_obyvacka
+        cover: cover.eve_motionblinds_obyvacka
+      - name: Spálňa Mama
+        window_sensor: binary_sensor.okno_mama_spalna
+        cover: cover.eve_motionblinds_spalna_mama
+      - name: Office Mama
+        window_sensor: binary_sensor.okno_office_mama
+        cover: cover.eve_motionblinds_office_mama
+      - name: Kuchyna
+        window_sensor: binary_sensor.okno_kuchyna
+        cover: cover.ikea_fyrtur_kuchyna
+      - name: Office Janko
+        window_sensor: binary_sensor.okno_office_janko
+        cover: cover.ikea_fyrtur_office_janko
+      - name: Spalna Janko
+        cover: cover.zavesy_spalna_janko

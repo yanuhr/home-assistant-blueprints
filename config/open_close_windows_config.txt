@@ -1,0 +1,14 @@
+alias: Monitorovanie okien
+description: ""
+use_blueprint:
+  path: yanuhr/open_close_windows.yaml
+  input:
+    window_sensors:
+      - binary_sensor.okno_kuchyna
+      - binary_sensor.okno_obyvacka
+      - binary_sensor.okno_office_mama
+      - binary_sensor.okno_mama_spalna
+      - binary_sensor.okno_vstupna_chodba
+    notification_services:
+      - notify.mobile_app_iphone_mama
+      - notify.mobile_app_iphone_jan

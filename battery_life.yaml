@@ -1,0 +1,125 @@
+blueprint:
+  name: Monitorovanie stavu batérií
+  description: >
+    Automatické sledovanie stavu batérií a odosielanie notifikácií raz denne,
+    ak je úroveň batérie nižšia ako 15%. Notifikácie sa odosielajú až do obnovenia batérie.
+
+  domain: automation
+  input:
+    battery_sensors:
+      name: Senzory batérií
+      description: Vyberte senzory batérií, ktoré chcete monitorovať
+      selector:
+        target:
+          entity:
+            domain: sensor
+            device_class: battery
+
+    notification_time:
+      name: Čas notifikácie
+      description: Čas, kedy sa majú odosielať notifikácie
+      default: "08:00:00"
+      selector:
+        time: {}
+
+    notification_services:
+      name: Notifikačné služby
+      description: >
+        Zadajte názvy notifikačných služieb (napr. notify.mobile_app_iphone_jan).
+        Môžete zadať viacero služieb, každú na nový riadok.
+      default: []
+      selector:
+        text:
+          multiple: true
+
+    memory_helper:
+      name: Pomocná entita pre pamäť
+      description: >
+        Vyberte input_text entitu, ktorá bude sledovať, ktoré batérie už boli notifikované.
+        Ak entita neexistuje, vytvorte ju v konfigurácii.
+      selector:
+        entity:
+          domain: input_text
+
+trigger:
+  - platform: time
+    at: !input notification_time
+
+condition: []
+
+action:
+  - variables:
+      battery_sensors: !input battery_sensors
+      notification_services: !input notification_services
+      memory_helper: !input memory_helper
+      notified_batteries: "{{ states(memory_helper) | default('') }}"
+      low_batteries: []
+      recovered_batteries: []
+
+  - repeat:
+      for_each: "{{ battery_sensors.entity_id }}"
+      sequence:
+        - variables:
+            battery_level: "{{ states(repeat.item) | float(100) }}"
+            battery_name: "{{ state_attr(repeat.item, 'friendly_name') | default(repeat.item) }}"
+            is_notified: "{{ repeat.item in notified_batteries.split(',') }}"
+
+        - if:
+            - condition: template
+              value_template: "{{ battery_level < 15 }}"
+          then:
+            - if:
+                - condition: template
+                  value_template: "{{ not is_notified }}"
+              then:
+                - variables:
+                    low_batteries: "{{ low_batteries + [battery_name] }}"
+                    notified_batteries: "{{ notified_batteries + ',' + repeat.item if notified_batteries else repeat.item }}"
+          else:
+            - if:
+                - condition: template
+                  value_template: "{{ is_notified }}"
+              then:
+                - variables:
+                    recovered_batteries: "{{ recovered_batteries + [battery_name] }}"
+                    notified_batteries: "{{ notified_batteries.replace(',' + repeat.item, '').replace(repeat.item + ',', '').replace(repeat.item, '') }}"
+
+  - if:
+      - condition: template
+        value_template: "{{ low_batteries | length > 0 and notification_services | length > 0 }}"
+    then:
+      - repeat:
+          for_each: "{{ notification_services }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              data:
+                title: "Upozornenie: Nízka batéria"
+                message: >-
+                  Zariadenia s nízkou batériou (pod 15%):
+                  {% for battery in low_batteries %}
+                  - {{ battery }}
+                  {% endfor %}
+
+  - if:
+      - condition: template
+        value_template: "{{ recovered_batteries | length > 0 and notification_services | length > 0 }}"
+    then:
+      - repeat:
+          for_each: "{{ notification_services }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              data:
+                title: "Batéria obnovená"
+                message: >-
+                  Zariadenia s obnovenou batériou (nad 15%):
+                  {% for battery in recovered_batteries %}
+                  - {{ battery }}
+                  {% endfor %}
+
+  - service: input_text.set_value
+    target:
+      entity_id: !input memory_helper
+    data:
+      value: "{{ notified_batteries.strip(',') }}"
+
+mode: single

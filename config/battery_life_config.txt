@@ -1,0 +1,40 @@
+alias: Sledovanie batérií s denným upozornením a pamäťou
+description: ""
+use_blueprint:
+  path: yanuhr/battery_life.yaml
+  input:
+    battery_sensors:
+      entity_id:
+        - sensor.eve_motionblinds_20caa9901_bateria_2
+        - sensor.eve_motionblinds_20caa9901_bateria_3
+        - sensor.eve_motionblinds_20caa9901_bateria
+        - sensor.ikea_fyrtur_kuchyna_battery
+        - sensor.ikea_fyrtur_office_janko_battery
+        - sensor.aqara_detektor_dymu_chodba_battery
+        - sensor.aqara_detektor_dymu_kuchyna_battery
+        - sensor.aqara_detektor_dymu_obyvacka_battery
+        - sensor.aqara_detektor_dymu_office_janko_battery
+        - sensor.aqara_detektor_dymu_poschodie_battery
+        - sensor.aqara_detektor_dymu_predchodba_battery
+        - sensor.aqara_detektor_dymu_spalna_janko_battery
+        - sensor.aqara_detektor_dymu_spalna_mama_battery
+        - sensor.aqara_detektor_dymu_vstupna_chodba_battery
+        - sensor.aqara_ventil_elektricky_kotol_battery
+        - sensor.aqara_ventil_plynovy_kotol_battery
+        - sensor.aqara_vypinac_osvetlenie_schodisko_battery
+        - sensor.aqara_zaplavovy_senzor_kuchyna_battery
+        - sensor.aqara_zaplavovy_senzor_kupelna_battery
+        - sensor.eve_door_20ebn9901_bateria
+        - sensor.eve_door_20ebn9901_bateria_2
+        - sensor.mqtt_spj_prepn_1_battery
+        - sensor.ikea_vypinac_office_janko_mqtt_battery
+        - sensor.aqara_motion_and_light_sensor_p2_bateria
+        - sensor.shelly_smoke_bateria_office_mama
+        - sensor.shelly_smoke_bateria_predna_pivnica
+        - sensor.shelly_smoke_bateria_toaleta
+        - sensor.shelly_smoke_bateria_zadna_pivnica
+        - sensor.inteligentny_ventil_kvapkova_zavlaha_battery
+    memory_helper: input_text.low_battery_tracking
+    notification_services:
+      - notify.mobile_app_iphone_jan
+    notification_time: "08:30:00"
