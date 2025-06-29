@@ -63,15 +63,7 @@ trigger:
 
 condition:
   - condition: template
-    value_template: >
-      {% set current_time = now().strftime('%H:%M:%S') %}
-      {% set morning_time = morning_trigger_time %}
-      {% set end_time = (strptime(morning_trigger_time, '%H:%M:%S') + timedelta(minutes=5)).strftime('%H:%M:%S') %}
-      {% if current_time >= morning_time and current_time <= end_time %}
-        true
-      {% else %}
-        false
-      {% endif %}
+    value_template: "{{ is_morning_window }}"
   - condition: sun
     before: sunset
 
@@ -90,6 +82,13 @@ action:
       is_bright: "{{ lux > 800 }}"
       is_dark: "{{ lux < 600 }}"
       is_daytime: "{{ is_morning_window and not after_sunset }}"
+
+  - service: logbook.log
+    data:
+      name: "Adaptívne tienenie"
+      message: >-
+        Debug: current_time={{ current_time }}, morning_trigger_time={{ morning_trigger_time }}, 
+        end_time={{ end_time }}, is_morning_window={{ is_morning_window }}
 
   - repeat:
       for_each: "{{ rooms }}"
