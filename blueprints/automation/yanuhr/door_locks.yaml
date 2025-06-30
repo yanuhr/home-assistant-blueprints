@@ -39,16 +39,20 @@ action:
           'locked': 'bol zamknutý 🔒',
           'unlocked': 'bol odomknutý 🔓',
           'jammed': 'je ZASEKNUTÝ ‼️. Potrebná rekalibrácia!',
-          'locking': 'sa práve zamyká...',
-          'unlocking': 'sa práve odomyká...',
+          'locking': 'sa práve zamyká ⏳',
+          'unlocking': 'sa práve odomyká ⏳',
           'unknown': 'je v neznámom stave ❓'
         } %}
-        {% set status = state_map.get(new_state, 'je v stave: ' ~ new_state) %}
-        Zámok {{ lock_name }} v miestnosti {{ lock_location }} {{ status }}
+        {% set status = state_map.get(new_state, 'je v stave: ' ~ new_state ~ ' ❓') %}
+        {% if lock_name == lock_location %}
+          Zámok {{ lock_name }} {{ status }}
+        {% else %}
+          Zámok {{ lock_name }} v miestnosti {{ lock_location }} {{ status }}
+        {% endif %}
 
   - if:
       - condition: template
-        value_template: "{{ notification_services | length > 0 }}"
+        value_template: "{{ notification_services | length > 0 and new_state != 'unknown' }}"
     then:
       - repeat:
           for_each: "{{ notification_services }}"
