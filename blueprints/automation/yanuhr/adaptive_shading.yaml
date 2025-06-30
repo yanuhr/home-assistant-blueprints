@@ -42,8 +42,8 @@ blueprint:
 initial_state: true
 
 trigger:
-  - platform: time_pattern
-    minutes: "/1"
+  - platform: time
+    at: !input morning_trigger_time
 
   - platform: numeric_state
     entity_id: !input lux_sensor
@@ -62,8 +62,8 @@ trigger:
     offset: "-00:30:00"
 
 condition:
-  - condition: template
-    value_template: "{{ is_morning_window }}"
+  - condition: time
+    after: !input morning_trigger_time
   - condition: sun
     before: sunset
 
@@ -75,20 +75,16 @@ action:
       open_windows: []
       after_sunset: "{{ state_attr('sun.sun', 'elevation') | float(1) < 0 }}"
       notification_services: !input notification_services
-      morning_trigger_time: !input morning_trigger_time
-      current_time: "{{ now().strftime('%H:%M:%S') }}"
-      end_time: "{{ (strptime(morning_trigger_time, '%H:%M:%S') + timedelta(minutes=5)).strftime('%H:%M:%S') }}"
-      is_morning_window: "{{ current_time >= morning_trigger_time and current_time <= end_time }}"
       is_bright: "{{ lux > 800 }}"
       is_dark: "{{ lux < 600 }}"
-      is_daytime: "{{ is_morning_window and not after_sunset }}"
+      is_daytime: "{{ not after_sunset }}"
 
   - service: logbook.log
     data:
       name: "Adaptívne tienenie"
       message: >-
-        Debug: current_time={{ current_time }}, morning_trigger_time={{ morning_trigger_time }}, 
-        end_time={{ end_time }}, is_morning_window={{ is_morning_window }}
+        Debug: lux={{ lux }} lux, is_daytime={{ is_daytime }}, is_bright={{ is_bright }}, 
+        is_dark={{ is_dark }}, after_sunset={{ after_sunset }}
 
   - repeat:
       for_each: "{{ rooms }}"
@@ -117,6 +113,8 @@ action:
                       - Stav okna: {{ 'otvorené' if window_sensor != '' and is_state(window_sensor, 'on') else 'zatvorené' if window_sensor != '' else 'žiadny senzor' }}
                       - Príznaky: is_daytime={{ is_daytime }}, is_bright={{ is_bright }}, is_dark={{ is_dark }}, after_sunset={{ after_sunset }}
                       - Dôvod: Vysoká úroveň osvetlenia počas dňa
+                - condition: template
+                  value_template: "{{ not is_state(cover, 'open') }}"
                 - service: cover.open_cover
                   target:
                     entity_id: "{{ cover }}"
@@ -140,6 +138,8 @@ action:
                       - Stav okna: {{ 'otvorené' if window_sensor != '' and is_state(window_sensor, 'on') else 'zatvorené' if window_sensor != '' else 'žiadny senzor' }}
                       - Príznaky: is_daytime={{ is_daytime }}, is_bright={{ is_bright }}, is_dark={{ is_dark }}, after_sunset={{ after_sunset }}
                       - Dôvod: Nízka úroveň osvetlenia alebo západ slnka, okno zatvorené
+                - condition: template
+                  value_template: "{{ not is_state(cover, 'closed') }}"
                 - delay:
                     seconds: 2
                 - service: cover.close_cover
@@ -176,7 +176,7 @@ action:
                           message: >-
                             Rolety v miestnosti {{ name }} sa nezatiahnu, pretože je otvorené okno.
                             Po jeho zatvorení sa roleta automaticky zatiahne o 30 sekúnd.
-                - wait_template: "{{ window_sensor == '' or is_state(window_sensor, 'off') }}"
+                - wait_template: "{{ is_state(window_sensor, 'off') }}"
                   timeout: "00:05:00"
                   continue_on_timeout: false
                 - delay:
@@ -193,9 +193,29 @@ action:
                       - Stav okna: zatvorené
                       - Príznaky: is_daytime={{ is_daytime }}, is_bright={{ is_bright }}, is_dark={{ is_dark }}, after_sunset={{ after_sunset }}
                       - Dôvod: Okno bolo zatvorené
+                - condition: template
+                  value_template: "{{ not is_state(cover, 'closed') }}"
                 - service: cover.close_cover
                   target:
                     entity_id: "{{ cover }}"
+
+            - alias: "Žiadna akcia - roleta zostáva nezmenená"
+              conditions:
+                - condition: template
+                  value_template: "{{ not (is_daytime and is_bright) and not ((is_dark and is_daytime) or after_sunset) }}"
+              sequence:
+                - service: logbook.log
+                  data:
+                    name: "Adaptívne tienenie"
+                    message: >-
+                      Rozhodnutie: Žiadna akcia v miestnosti {{ name }}
+                      - Miestnosť: {{ name }}
+                      - Roleta: {{ cover }}
+                      - Senzor okna: {{ sensor_id }}
+                      - Osvetlenie: {{ lux }} lux
+                      - Stav okna: {{ 'otvorené' if window_sensor != '' and is_state(window_sensor, 'on') else 'zatvorené' if window_sensor != '' else 'žiadny senzor' }}
+                      - Príznaky: is_daytime={{ is_daytime }}, is_bright={{ is_bright }}, is_dark={{ is_dark }}, after_sunset={{ after_sunset }}
+                      - Dôvod: Osvetlenie mimo rozsahu ({{ lux }} lux) alebo stále noc
 
   - if:
       - condition: template
