@@ -119,10 +119,27 @@ variables:
   light_is_on: "{{ is_state(target_light_id, 'on') }}"
   window_is_closed: "{{ (window_cover_id | default('')) == '' or is_state(window_cover_id, 'closed') }}"
   window_is_open: "{{ (window_cover_id | default('')) != '' and is_state(window_cover_id, 'open') }}"
-  recent_pir_motion_2min: "{{ pir_sensor_id is none or ((now() - states[pir_sensor_id].last_updated).total_seconds() < 120 and is_state(pir_sensor_id, 'on')) }}"
-  pir_idle_long: "{{ pir_sensor_id is none or ((now() - states[pir_sensor_id].last_updated).total_seconds() > 300 and is_state(pir_sensor_id, 'off')) }}"
-  valid_presence: "{{ (zone1_detected or interference_detected) and (pir_detected or recent_pir_motion_2min) }}"
-  interference_timeout_reached: "{{ not zone1_detected and pir_idle_long }}"
+  recent_pir_motion_2min: >-
+    {{
+      pir_sensor_id is not none and
+      ((now() - states[pir_sensor_id].last_updated).total_seconds() < 120 and is_state(pir_sensor_id, 'on'))
+    }}
+  pir_idle_long: >-
+    {{
+      pir_sensor_id is not none and
+      ((now() - states[pir_sensor_id].last_updated).total_seconds() > 300 and is_state(pir_sensor_id, 'off'))
+    }}
+  valid_presence: >-
+    {{
+      zone1_detected or
+      (interference_detected and (pir_detected or recent_pir_motion_2min))
+    }}
+  interference_timeout_reached: >-
+    {{
+      not zone1_detected and
+      interference_detected and
+      pir_idle_long
+    }}
 
 condition:
   - condition: template
