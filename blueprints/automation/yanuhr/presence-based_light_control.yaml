@@ -94,8 +94,10 @@ trigger:
     entity_id: !input zone1_sensor
   - platform: state
     entity_id: !input interference_zone_sensor
+  - platform: state
+    entity_id: !input window_cover
   - platform: time_pattern
-    seconds: /30
+    seconds: /15
 
 variables:
   zone1_sensor_id: !input zone1_sensor
@@ -116,10 +118,11 @@ variables:
   light_is_off: "{{ is_state(target_light_id, 'off') }}"
   light_is_on: "{{ is_state(target_light_id, 'on') }}"
   window_is_closed: "{{ (window_cover_id | default('')) == '' or is_state(window_cover_id, 'closed') }}"
-  window_is_closing: "{{ (window_cover_id | default('')) != '' and is_state(window_cover_id, 'closing') }}"
   window_is_open: "{{ (window_cover_id | default('')) != '' and is_state(window_cover_id, 'open') }}"
-  valid_presence: "{{ (zone1_detected and not interference_detected) or (interference_detected and pir_detected) }}"
-  interference_timeout_reached: "{{ interference_detected and not zone1_detected and (as_timestamp(now()) - as_timestamp(states[interference_zone_sensor_id].last_changed)) > interference_timeout }}"
+  recent_pir_motion_2min: "{{ pir_sensor_id is none or ((now() - states[pir_sensor_id].last_updated).total_seconds() < 120 and is_state(pir_sensor_id, 'on')) }}"
+  pir_idle_long: "{{ pir_sensor_id is none or ((now() - states[pir_sensor_id].last_updated).total_seconds() > 300 and is_state(pir_sensor_id, 'off')) }}"
+  valid_presence: "{{ (zone1_detected or interference_detected) and (pir_detected or recent_pir_motion_2min) }}"
+  interference_timeout_reached: "{{ not zone1_detected and pir_idle_long }}"
 
 condition:
   - condition: template
@@ -129,22 +132,23 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ window_is_closing and zone1_detected and light_is_off }}"
+            value_template: "{{ window_cover_id != '' and is_state(window_cover_id, 'closing') and zone1_detected and light_is_off }}"
         sequence:
           - service: light.turn_on
             target:
               entity_id: "{{ target_light_id }}"
-          - service: logbook.log
-            data:
-              name: "Spoľahlivé osvetlenie"
-              message: "Svetlo zapnuté - Zóna 1: {{ zone1_detected }}, Roleta: zatvára sa"
-          - repeat:
-              for_each: "{{ notification_services }}"
-              sequence:
-                - service: "{{ repeat.item }}"
-                  data:
-                    title: "Spoľahlivé osvetlenie"
-                    message: "Svetlo zapnuté - Zóna 1: {{ zone1_detected }}, Roleta: zatvára sa"
+          - parallel:
+              - service: logbook.log
+                data:
+                  name: "Spoľahlivé osvetlenie"
+                  message: "Svetlo zapnuté - Zóna 1: {{ zone1_detected }}, Roleta: zatvára sa"
+              - repeat:
+                  for_each: "{{ notification_services }}"
+                  sequence:
+                    - service: "{{ repeat.item }}"
+                      data:
+                        title: "Spoľahlivé osvetlenie"
+                        message: "Svetlo zapnuté - Zóna 1: {{ zone1_detected }}, Roleta: zatvára sa"
 
       - conditions:
           - condition: template
@@ -153,38 +157,44 @@ action:
           - service: light.turn_on
             target:
               entity_id: "{{ target_light_id }}"
-          - service: logbook.log
-            data:
-              name: "Spoľahlivé osvetlenie"
-              message: "Svetlo zapnuté - Validná prítomnosť: {{ valid_presence }}, Roleta: {{ window_is_closed }}"
-          - repeat:
-              for_each: "{{ notification_services }}"
-              sequence:
-                - service: "{{ repeat.item }}"
-                  data:
-                    title: "Spoľahlivé osvetlenie"
-                    message: "Svetlo zapnuté - Validná prítomnosť: {{ valid_presence }}, Roleta: {{ window_is_closed }}"
+          - parallel:
+              - service: logbook.log
+                data:
+                  name: "Spoľahlivé osvetlenie"
+                  message: >-
+                    Svetlo zapnuté - Zóna 1: {{ zone1_detected }}, Interferencia: {{ interference_detected }}, 
+                    PIR: {{ pir_detected }}, PIR 2min: {{ recent_pir_motion_2min }}, Validná prítomnosť: {{ valid_presence }}
+              - repeat:
+                  for_each: "{{ notification_services }}"
+                  sequence:
+                    - service: "{{ repeat.item }}"
+                      data:
+                        title: "Spoľahlivé osvetlenie"
+                        message: >-
+                          Svetlo zapnuté - Zóna 1: {{ zone1_detected }}, Interferencia: {{ interference_detected }}, 
+                          PIR: {{ pir_detected }}, PIR 2min: {{ recent_pir_motion_2min }}, Validná prítomnosť: {{ valid_presence }}
 
       - conditions:
           - condition: template
-            value_template: "{{ window_is_open and light_is_on }}"
+            value_template: "{{ window_cover_id != '' and is_state(window_cover_id, 'open') and light_is_on }}"
         sequence:
           - delay:
               seconds: 2
           - service: light.turn_off
             target:
               entity_id: "{{ target_light_id }}"
-          - service: logbook.log
-            data:
-              name: "Spoľahlivé osvetlenie"
-              message: "Svetlo zhasnuté - Roleta: otvorená"
-          - repeat:
-              for_each: "{{ notification_services }}"
-              sequence:
-                - service: "{{ repeat.item }}"
-                  data:
-                    title: "Spoľahlivé osvetlenie"
-                    message: "Svetlo zhasnuté - Roleta: otvorená"
+          - parallel:
+              - service: logbook.log
+                data:
+                  name: "Spoľahlivé osvetlenie"
+                  message: "Svetlo zhasnuté - Roleta: otvorená"
+              - repeat:
+                  for_each: "{{ notification_services }}"
+                  sequence:
+                    - service: "{{ repeat.item }}"
+                      data:
+                        title: "Spoľahlivé osvetlenie"
+                        message: "Svetlo zhasnuté - Roleta: otvorená"
 
       - conditions:
           - condition: template
@@ -200,29 +210,35 @@ action:
               - service: light.turn_off
                 target:
                   entity_id: "{{ target_light_id }}"
-              - service: logbook.log
-                data:
-                  name: "Spoľahlivé osvetlenie"
-                  message: "Svetlo zhasnuté - {{ 'timeout interferenčnej zóny' if interference_timeout_reached else 'žiadna validná prítomnosť' }}"
-              - repeat:
-                  for_each: "{{ notification_services }}"
-                  sequence:
-                    - service: "{{ repeat.item }}"
-                      data:
-                        title: "Spoľahlivé osvetlenie"
-                        message: "Svetlo zhasnuté - {{ 'timeout interferenčnej zóny' if interference_timeout_reached else 'žiadna validná prítomnosť' }}"
+              - parallel:
+                  - service: logbook.log
+                    data:
+                      name: "Spoľahlivé osvetlenie"
+                      message: >-
+                        Svetlo zhasnuté - Zóna 1: {{ zone1_detected }}, PIR idle: {{ pir_idle_long }}, 
+                        {{ 'timeout interferenčnej zóny' if interference_timeout_reached else 'žiadna validná prítomnosť' }}
+                  - repeat:
+                      for_each: "{{ notification_services }}"
+                      sequence:
+                        - service: "{{ repeat.item }}"
+                          data:
+                            title: "Spoľahlivé osvetlenie"
+                            message: >-
+                              Svetlo zhasnuté - Zóna 1: {{ zone1_detected }}, PIR idle: {{ pir_idle_long }}, 
+                              {{ 'timeout interferenčnej zóny' if interference_timeout_reached else 'žiadna validná prítomnosť' }}
 
     default:
-      - service: logbook.log
-        data:
-          name: "Spoľahlivé osvetlenie"
-          message: "Žiadna podmienka nebola splnená – žiadna akcia nebola vykonaná."
-      - repeat:
-          for_each: "{{ notification_services }}"
-          sequence:
-            - service: "{{ repeat.item }}"
-              data:
-                title: "Spoľahlivé osvetlenie"
-                message: "Automatizácia sa spustila, ale žiadna podmienka nebola splnená."
+      - parallel:
+          - service: logbook.log
+            data:
+              name: "Spoľahlivé osvetlenie"
+              message: "Žiadna podmienka nebola splnená – žiadna akcia nebola vykonaná."
+          - repeat:
+              for_each: "{{ notification_services }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  data:
+                    title: "Spoľahlivé osvetlenie"
+                    message: "Automatizácia sa spustila, ale žiadna podmienka nebola splnená."
 
 mode: restart
