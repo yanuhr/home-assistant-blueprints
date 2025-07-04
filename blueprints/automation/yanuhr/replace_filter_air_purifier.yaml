@@ -7,7 +7,6 @@ blueprint:
   input:
     filter_sensors:
       name: Senzory filtra
-      description: Vyberte binárne senzory, ktoré signalizujú potrebu výmeny filtra
       selector:
         entity:
           domain: binary_sensor
@@ -15,7 +14,6 @@ blueprint:
 
     notification_services:
       name: Notifikačné služby
-      description: Zadajte služby na odoslanie (napr. notify.mobile_app_pixel)
       default: []
       selector:
         text:
@@ -42,13 +40,13 @@ trigger:
   - platform: time
     at: !input notification_time
 
-condition: []
-
 action:
+  - variables:
+      entities: !input filter_sensors
   - variables:
       active_sensors: >
         {% set result = namespace(list=[]) %}
-        {% for e in expand(!input filter_sensors) %}
+        {% for e in expand(entities) %}
           {% if e.state == 'on' %}
             {% set result.list = result.list + [e] %}
           {% endif %}
@@ -74,7 +72,7 @@ action:
             value_template: "{{ active_sensors | count > 0 }}"
           - condition: template
             value_template: >
-              {{ trigger.platform != 'state' or (!input immediate_notification | bool == false and trigger.platform == 'state') == false }}
+              {{ trigger.platform != 'state' or (trigger.platform == 'state' and immediate_notification | bool) }}
         sequence:
           - repeat:
               for_each: !input notification_services
