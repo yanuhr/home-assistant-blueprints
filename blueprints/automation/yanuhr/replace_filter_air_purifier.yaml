@@ -1,16 +1,15 @@
 blueprint:
   name: Upozornenie na výmenu filtra v čističke vzduchu
   description: >
-    Automaticky upozorňuje používateľa, keď je potrebné vymeniť filter v čističke vzduchu.
-    Podporuje viacero senzorov a viacero notifikačných služieb.
-    Pracuje výlučne so stavom 'on' binárnych senzorov, ktoré signalizujú potrebu výmeny filtra.
-    Stateless riešenie bez pamäťovej logiky.
+    Upozornenie, keď je potrebné vymeniť filter v čističke vzduchu.
+    Podporuje viacero senzorov a notifikačných služieb.
+    Stateless riešenie.
 
   domain: automation
   input:
     filter_sensors:
       name: Senzory filtra
-      description: Vyberte senzory filtra, ktoré chcete monitorovať
+      description: Vyberte senzory filtra
       selector:
         entity:
           domain: binary_sensor
@@ -18,9 +17,7 @@ blueprint:
 
     notification_services:
       name: Notifikačné služby
-      description: >
-        Zadajte názvy notifikačných služieb (napr. notify.mobile_app_pixel).
-        Môžete zadať viacero služieb, každú na nový riadok.
+      description: Napr. notify.mobile_app_pixel
       default: []
       selector:
         text:
@@ -28,14 +25,12 @@ blueprint:
 
     notification_time:
       name: Čas notifikácie
-      description: Kedy sa má notifikácia odosielať (raz denne)
       default: "08:00:00"
       selector:
         time: {}
 
     immediate_notification:
       name: Okamžitá notifikácia
-      description: Poslať notifikáciu okamžite po prepnutí senzora na "on"
       default: true
       selector:
         boolean: {}
@@ -45,20 +40,19 @@ trigger:
     entity_id: !input filter_sensors
     from: "off"
     to: "on"
-
   - platform: time
     at: !input notification_time
 
-condition: []
+variables:
+  my_entities: !input filter_sensors
+  my_services: !input notification_services
+  notify_now: !input immediate_notification
 
 action:
   - variables:
-      entities: !input filter_sensors
-      notification_services: !input notification_services
-      immediate: !input immediate_notification
       active_sensors: >
         {% set result = namespace(list=[]) %}
-        {% for e in expand(entities) %}
+        {% for e in expand(my_entities) %}
           {% if e.state == 'on' %}
             {% set result.list = result.list + [e] %}
           {% endif %}
@@ -69,7 +63,7 @@ action:
           {{ '' }}
         {% elif active_sensors | count == 1 %}
           {% set s = active_sensors[0] %}
-          {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter v čističke vzduchu!
+          {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter!
         {% else %}
           Vymeň filter v týchto čističkách:
           {% for s in active_sensors %}
@@ -82,26 +76,21 @@ action:
           - condition: template
             value_template: "{{ active_sensors | count > 0 }}"
           - condition: template
-            value_template: "{{ notification_services | count > 0 }}"
+            value_template: "{{ my_services | count > 0 }}"
           - condition: or
             conditions:
               - condition: template
                 value_template: "{{ trigger.platform != 'state' }}"
               - condition: template
-                value_template: "{{ (trigger.platform == 'state') and (immediate | bool) }}"
+                value_template: "{{ trigger.platform == 'state' and notify_now }}"
         sequence:
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ message_text | trim != '' }}"
-                sequence:
-                  - repeat:
-                      for_each: "{{ notification_services }}"
-                      sequence:
-                        - service: "{{ repeat.item }}"
-                          data:
-                            title: "Výmena filtra čističky vzduchu"
-                            message: "{{ message_text }}"
+          - repeat:
+              for_each: "{{ my_services }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  data:
+                    title: "Výmena filtra"
+                    message: "{{ message_text }}"
 
 mode: queued
 max: 10
