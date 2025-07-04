@@ -66,19 +66,18 @@ condition:
             value_template: "{{ immediate_notification }}"
 
 action:
+  - variables:
+      active: "{{ filter_sensors | select('is_state', 'on') | list }}"
   - repeat:
       for_each: !input notification_services
       sequence:
-        - variables:
-            active: "{{ filter_sensors | select('is_state', 'on') | list }}"
         - service: "{{ repeat.item }}"
           data:
             title: "Výmena filtra čističky vzduchu"
             message: >
               {% if active | count == 1 %}
-                {% for s in active %}
-                  {{ area_name(s) | default("Neznáma miestnosť") }} – {{ state_attr(s, 'friendly_name') | default(s) }}: Vymeň filter v čističke vzduchu!
-                {% endfor %}
+                {% set s = active[0] %}
+                {{ area_name(s) | default("Neznáma miestnosť") }} – {{ state_attr(s, 'friendly_name') | default(s) }}: Vymeň filter v čističke vzduchu!
               {% else %}
                 Vymeň filter v týchto čističkách:
                 {% for s in active %}
