@@ -67,7 +67,7 @@ condition:
 
 action:
   - repeat:
-      for_each: "{{ notification_services }}"
+      for_each: !input notification_services
       sequence:
         - service: "{{ repeat.item }}"
           data:
