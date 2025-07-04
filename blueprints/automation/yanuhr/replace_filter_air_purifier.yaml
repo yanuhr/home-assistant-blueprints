@@ -76,15 +76,15 @@ action:
         {% endfor %}
         {{ active }}
       sensor_count: "{{ active_sensors | count }}"
-      device_info: >
-        {% set info = [] %}
+      debug_info: >
+        {% set debug = [] %}
         {% for sensor in active_sensors %}
           {% set entity_state = states(sensor) %}
-          {% set room = area_name(sensor) | default("Neznáma miestnosť") %}
-          {% set device_name = entity_state.attributes.friendly_name | default(sensor) %}
-          {% set info = info + [room ~ " – " ~ device_name] %}
+          {% set room = area_name(sensor) %}
+          {% set friendly_name = entity_state.attributes.friendly_name %}
+          {% set debug = debug + [sensor ~ "|room:" ~ room ~ "|name:" ~ friendly_name] %}
         {% endfor %}
-        {{ info }}
+        {{ debug }}
 
   - repeat:
       for_each: !input notification_services
@@ -94,9 +94,9 @@ action:
             title: "Výmena filtra čističky vzduchu"
             message: >
               {% if sensor_count == '1' %}
-                {{ device_info[0] }}: Vymeň filter v čističke vzduchu!
+                Debug: {{ debug_info[0] }} - Vymeň filter v čističke vzduchu!
               {% else %}
-                Vymeň filter v týchto čističkách: {{ device_info | join(', ') }}
+                Debug info: {{ debug_info | join(', ') }}
               {% endif %}
 
 mode: queued
