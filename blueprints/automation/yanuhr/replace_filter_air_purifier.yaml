@@ -69,17 +69,16 @@ action:
   - variables:
       active_sensors: >
         {{ expand(filter_sensors) | selectattr('state', 'eq', 'on') | list }}
-message_text: >
-  {% if active_sensors | count == 1 %}
-    {% set s = active_sensors[0] %}
-    {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter v čističke vzduchu!
-  {% else %}
-    Vymeň filter v týchto čističkách:\n
-    {% for s in active_sensors %}
-      {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}{% if not loop.last %}, {% endif %}
-    {% endfor %}
-  {% endif %}
-
+      message_text: >
+        {% if active_sensors | count == 1 %}
+          {% set s = active_sensors[0] %}
+          {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter v čističke vzduchu!
+        {% else %}
+          Vymeň filter v týchto čističkách:\n
+          {% for s in active_sensors %}
+            {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% endif %}
 
   - repeat:
       for_each: !input notification_services
