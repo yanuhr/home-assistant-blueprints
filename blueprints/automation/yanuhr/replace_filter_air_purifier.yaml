@@ -49,30 +49,29 @@ trigger:
     at: !input notification_time
 
 action:
-  - repeat:
-      for_each: !input notification_services
-      sequence:
-        - variables:
-            entities: !input filter_sensors
-            active_sensors: >
-              {{ expand(entities) | selectattr('state', 'eq', 'on') | list }}
-            message_text: >
-              Aktívne entity: {{ active_sensors | map(attribute='entity_id') | list }}
-              {% if active_sensors | count == 0 %}
-                {{ '' }}
-              {% elif active_sensors | count == 1 %}
-                {% set s = active_sensors[0] %}
-                {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.attributes.friendly_name | default(s.name) | default(s.entity_id) }}: Vymeň filter v čističke vzduchu!
-              {% else %}
-                Vymeň filter v týchto čističkách:
-                {% for s in active_sensors %}
-                - entity_id: {{ s.entity_id }}, name: {{ s.attributes.friendly_name | default(s.name) | default(s.entity_id) }}, area: {{ area_name(s.entity_id) | default("Neznáma miestnosť") }}
-                {% endfor %}
-              {% endif %}
-        - choose:
-            - conditions:
-                - condition: template
-                  value_template: "{{ message_text | trim != '' }}"
+  - variables:
+      entities: !input filter_sensors
+      active_sensors: >
+        {{ expand(entities) | selectattr('state', 'eq', 'on') | list }}
+      message_text: >
+        {% if active_sensors | count == 0 %}
+          {{ '' }}
+        {% elif active_sensors | count == 1 %}
+          {% set s = active_sensors[0] %}
+          {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.attributes.friendly_name | default(s.name) | default(s.entity_id) }}: Vymeň filter v čističke vzduchu!
+        {% else %}
+          Vymeň filter v týchto čističkách:
+          {% for s in active_sensors %}
+          - entity_id: {{ s.entity_id }}, name: {{ s.attributes.friendly_name | default(s.name) | default(s.entity_id) }}, area: {{ area_name(s.entity_id) | default("Neznáma miestnosť") }}
+          {% endfor %}
+        {% endif %}
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ message_text | trim != '' }}"
+        sequence:
+          - repeat:
+              for_each: !input notification_services
               sequence:
                 - service: "{{ repeat.item }}"
                   data:
