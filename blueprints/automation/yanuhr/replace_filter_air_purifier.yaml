@@ -67,7 +67,8 @@ condition:
 
 action:
   - variables:
-      active_sensors: "{{ filter_sensors | select('is_state', 'on') | list }}"
+      active_sensors: >
+        {{ filter_sensors | select('is_state', 'on') | list }}
       message_text: >
         {% if active_sensors | count == 1 %}
           {% set s = active_sensors[0] %}
@@ -85,7 +86,6 @@ action:
           data:
             title: "Výmena filtra čističky vzduchu"
             message: "{{ message_text }}"
-
 
 mode: queued
 max: 10
