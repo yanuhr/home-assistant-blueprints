@@ -49,46 +49,34 @@ trigger:
     at: !input notification_time
 
 action:
-  - variables:
-      entities: !input filter_sensors
-      services: !input notification_services
-      immediate_enabled: !input immediate_notification
-      should_notify: >
-        {% set active = expand(entities) | selectattr('state', 'eq', 'on') | list %}
-        {{ active | count > 0 and services | length > 0 }}
-      should_continue: >
-        {% if trigger.platform == 'time' %}
-          {{ true }}
-        {% elif trigger.platform == 'state' %}
-          {{ immediate_enabled }}
-        {% else %}
-          {{ false }}
-        {% endif %}
-
-  - if:
-      - condition: template
-        value_template: "{{ should_notify and should_continue }}"
-    then:
-      - repeat:
-          for_each: !input notification_services
-          sequence:
-            - variables:
-                active_sensors: >
-                  {{ expand(entities) | selectattr('state', 'eq', 'on') | list }}
-                message_text: >
-                  {% if active_sensors | count == 1 %}
-                    {% set s = active_sensors[0] %}
-                    {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter v čističke vzduchu!
-                  {% else %}
-                    Vymeň filter v týchto čističkách:
-                    {% for s in active_sensors %}
-                    - {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}
-                    {% endfor %}
-                  {% endif %}
-            - service: "{{ repeat.item }}"
-              data:
-                title: "Výmena filtra čističky vzduchu"
-                message: "{{ message_text }}"
+  - repeat:
+      for_each: !input notification_services
+      sequence:
+        - variables:
+            entities: !input filter_sensors
+            active_sensors: >
+              {{ expand(entities) | selectattr('state', 'eq', 'on') | list }}
+            message_text: >
+              {% if active_sensors | count == 0 %}
+                {{ '' }}
+              {% elif active_sensors | count == 1 %}
+                {% set s = active_sensors[0] %}
+                {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter v čističke vzduchu!
+              {% else %}
+                Vymeň filter v týchto čističkách:
+                {% for s in active_sensors %}
+                - {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}
+                {% endfor %}
+              {% endif %}
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ message_text | trim != '' }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  data:
+                    title: "Výmena filtra čističky vzduchu"
+                    message: "{{ message_text }}"
 
 mode: queued
 max: 10
