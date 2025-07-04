@@ -58,15 +58,20 @@ action:
       immediate_notification: !input immediate_notification
       active_sensors: >
         {{ expand(entities) | selectattr('state', 'eq', 'on') | list }}
+      sensors_sorted: >
+        {{ expand(entities)
+          | selectattr('state', 'eq', 'on')
+          | sort(attribute='attributes.friendly_name')
+          | list }}
       message_text: >
-        {% if active_sensors | count == 0 %}
+        {% if sensors_sorted | count == 0 %}
           {{ '' }}
-        {% elif active_sensors | count == 1 %}
-          {% set s = active_sensors[0] %}
+        {% elif sensors_sorted | count == 1 %}
+          {% set s = sensors_sorted[0] %}
           {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.attributes.friendly_name | default(s.entity_id) }}: Vymeň filter v čističke vzduchu!
         {% else %}
           Vymeň filter v týchto čističkách:
-          {% for s in active_sensors %}
+          {% for s in sensors_sorted %}
             • {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.attributes.friendly_name | default(s.entity_id) }}
           {% endfor %}
         {% endif %}
