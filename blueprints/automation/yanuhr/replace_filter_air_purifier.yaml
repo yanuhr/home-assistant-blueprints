@@ -51,8 +51,11 @@ trigger:
 condition:
   - condition: template
     value_template: >
-      {% set active = filter_sensors | select('is_state', 'on') | list %}
-      {{ active | count > 0 and notification_services | length > 0 }}
+      {% set active = expand(entities) | selectattr('state', 'eq', 'on') | list %}
+      {{ active | count > 0 and services | length > 0 }}
+    variables:
+      entities: !input filter_sensors
+      services: !input notification_services
 
   - condition: or
     conditions:
@@ -63,14 +66,18 @@ condition:
           - condition: template
             value_template: "{{ trigger.platform == 'state' }}"
           - condition: template
-            value_template: "{{ immediate_notification }}"
+            value_template: "{{ immediate_enabled }}"
+        variables:
+          immediate_enabled: !input immediate_notification
 
 action:
   - repeat:
       for_each: !input notification_services
       sequence:
         - variables:
-            active_sensors: "{{ expand(filter_sensors) | selectattr('state', 'eq', 'on') | list }}"
+            entities: !input filter_sensors
+            active_sensors: >
+              {{ expand(entities) | selectattr('state', 'eq', 'on') | list }}
             message_text: >
               {% if active_sensors | count == 1 %}
                 {% set s = active_sensors[0] %}
