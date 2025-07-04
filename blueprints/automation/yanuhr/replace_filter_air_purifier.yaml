@@ -1,15 +1,13 @@
 blueprint:
   name: Upozornenie na výmenu filtra v čističke vzduchu
   description: >
-    Upozornenie, keď je potrebné vymeniť filter v čističke vzduchu.
-    Podporuje viacero senzorov a notifikačných služieb.
-    Stateless riešenie.
+    Upozorňuje používateľa, keď je potrebné vymeniť filter v čističke vzduchu.
+    Funguje pre viacero senzorov a notifikačných služieb. Stateless automatizácia.
 
   domain: automation
   input:
     filter_sensors:
       name: Senzory filtra
-      description: Vyberte senzory filtra
       selector:
         entity:
           domain: binary_sensor
@@ -17,14 +15,13 @@ blueprint:
 
     notification_services:
       name: Notifikačné služby
-      description: Napr. notify.mobile_app_pixel
       default: []
       selector:
         text:
           multiple: true
 
     notification_time:
-      name: Čas notifikácie
+      name: Čas dennej notifikácie
       default: "08:00:00"
       selector:
         time: {}
@@ -40,28 +37,29 @@ trigger:
     entity_id: !input filter_sensors
     from: "off"
     to: "on"
+
   - platform: time
     at: !input notification_time
 
-variables:
-  my_entities: !input filter_sensors
-  my_services: !input notification_services
-  notify_now: !input immediate_notification
-
 action:
   - variables:
+      sensor_entities: !input filter_sensors
+      notify_services: !input notification_services
+      notify_now: !input immediate_notification
+
+  - variables:
       active_sensors: >
-        {% set result = namespace(list=[]) %}
-        {% for e in expand(my_entities) %}
-          {% if e.state == 'on' %}
-            {% set result.list = result.list + [e] %}
+        {% set list = namespace(items=[]) %}
+        {% for s in expand(sensor_entities) %}
+          {% if s.state == 'on' %}
+            {% set list.items = list.items + [s] %}
           {% endif %}
         {% endfor %}
-        {{ result.list }}
+        {{ list.items }}
       message_text: >
-        {% if active_sensors | count == 0 %}
+        {% if active_sensors | length == 0 %}
           {{ '' }}
-        {% elif active_sensors | count == 1 %}
+        {% elif active_sensors | length == 1 %}
           {% set s = active_sensors[0] %}
           {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter!
         {% else %}
@@ -74,18 +72,18 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ active_sensors | count > 0 }}"
+            value_template: "{{ active_sensors | length > 0 }}"
           - condition: template
-            value_template: "{{ my_services | count > 0 }}"
+            value_template: "{{ notify_services | length > 0 }}"
           - condition: or
             conditions:
               - condition: template
-                value_template: "{{ trigger.platform != 'state' }}"
+                value_template: "{{ trigger.platform == 'time' }}"
               - condition: template
                 value_template: "{{ trigger.platform == 'state' and notify_now }}"
         sequence:
           - repeat:
-              for_each: "{{ my_services }}"
+              for_each: "{{ notify_services }}"
               sequence:
                 - service: "{{ repeat.item }}"
                   data:
