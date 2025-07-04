@@ -76,11 +76,11 @@ action:
               {% set active_sensors = filter_sensors | select('is_state', 'on') | list %}
               {% if active_sensors | count == 1 %}
                 {% set s = active_sensors[0] %}
-                {{ area_name(s) | default("Neznáma miestnosť") }} – {{ state_attr(s, 'friendly_name') | default(s) }}: Vymeň filter v čističke vzduchu!
+                Senzor: {{ s }} - Vymeň filter v čističke vzduchu!
               {% else %}
                 Vymeň filter v týchto čističkách:
                 {% for s in active_sensors %}
-                  {{ area_name(s) | default("Neznáma miestnosť") }} – {{ state_attr(s, 'friendly_name') | default(s) }}{% if not loop.last %}, {% endif %}
+                  {{ s }}{% if not loop.last %}, {% endif %}
                 {% endfor %}
               {% endif %}
 
