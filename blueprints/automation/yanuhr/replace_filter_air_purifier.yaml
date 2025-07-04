@@ -1,8 +1,9 @@
 blueprint:
   name: Upozornenie na výmenu filtra v čističke vzduchu
   description: >
-    Automaticky upozorňuje na potrebu výmeny filtra v čističke vzduchu.
-    Podporuje viacero senzorov a notifikačných služieb.
+    Automaticky upozorňuje používateľa, keď je potrebné vymeniť filter v čističke vzduchu.
+    Podporuje viacero senzorov a viacero notifikačných služieb.
+    Pracuje výlučne so stavom 'on' binárnych senzorov, ktoré signalizujú potrebu výmeny filtra.
     Stateless riešenie bez pamäťovej logiky.
 
   domain: automation
@@ -18,7 +19,7 @@ blueprint:
     notification_services:
       name: Notifikačné služby
       description: >
-        Zadajte názvy notifikačných služieb (napr. notify.mobile_app_iphone_jan).
+        Zadajte názvy notifikačných služieb (napr. notify.mobile_app_pixel).
         Môžete zadať viacero služieb, každú na nový riadok.
       default: []
       selector:
@@ -48,36 +49,52 @@ trigger:
   - platform: time
     at: !input notification_time
 
+condition: []
+
 action:
   - variables:
       entities: !input filter_sensors
+      notification_services: !input notification_services
+      immediate_notification: !input immediate_notification
       active_sensors: >
         {{ expand(entities) | selectattr('state', 'eq', 'on') | list }}
       message_text: >
         {% if active_sensors | count == 0 %}
           {{ '' }}
         {% elif active_sensors | count == 1 %}
-          {% set s_obj = states[active_sensors[0]] if active_sensors[0] is string else active_sensors[0] %}
-          {{ area_name(s_obj.entity_id) | default("Neznáma miestnosť") }} – {{ s_obj.attributes.friendly_name | default(s_obj.name) | default(s_obj.entity_id) }}: Vymeň filter v čističke vzduchu!
+          {% set s = active_sensors[0] %}
+          {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.attributes.friendly_name | default(s.entity_id) }}: Vymeň filter v čističke vzduchu!
         {% else %}
           Vymeň filter v týchto čističkách:
           {% for s in active_sensors %}
-            {% set s_obj = states[s] if s is string else s %}
-            • {{ area_name(s_obj.entity_id) | default("Neznáma miestnosť") }} – {{ s_obj.attributes.friendly_name | default(s_obj.name) | default(s_obj.entity_id) }}
+            • {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.attributes.friendly_name | default(s.entity_id) }}
           {% endfor %}
         {% endif %}
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ message_text | trim != '' }}"
+            value_template: "{{ active_sensors | count > 0 }}"
+          - condition: template
+            value_template: "{{ notification_services | count > 0 }}"
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: "{{ trigger.platform != 'state' }}"
+              - condition: template
+                value_template: "{{ (trigger.platform == 'state') and (immediate_notification | bool) }}"
         sequence:
-          - repeat:
-              for_each: !input notification_services
-              sequence:
-                - service: "{{ repeat.item }}"
-                  data:
-                    title: "Výmena filtra čističky vzduchu"
-                    message: "{{ message_text }}"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ message_text | trim != '' }}"
+                sequence:
+                  - repeat:
+                      for_each: "{{ notification_services }}"
+                      sequence:
+                        - service: "{{ repeat.item }}"
+                          data:
+                            title: "Výmena filtra čističky vzduchu"
+                            message: "{{ message_text }}"
 
 mode: queued
 max: 10
