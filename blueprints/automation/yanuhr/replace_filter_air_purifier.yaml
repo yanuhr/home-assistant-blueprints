@@ -67,8 +67,19 @@ condition:
 
 action:
   - variables:
-      filter_sensors_debug: "{{ filter_sensors }}"
-      filter_sensors_count: "{{ filter_sensors | count }}"
+      active_sensors: >
+        {{ expand(filter_sensors) | selectattr('state', 'eq', 'on') | list }}
+message_text: >
+  {% if active_sensors | count == 1 %}
+    {% set s = active_sensors[0] %}
+    {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter v čističke vzduchu!
+  {% else %}
+    Vymeň filter v týchto čističkách:\n
+    {% for s in active_sensors %}
+      {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}{% if not loop.last %}, {% endif %}
+    {% endfor %}
+  {% endif %}
+
 
   - repeat:
       for_each: !input notification_services
@@ -76,9 +87,7 @@ action:
         - service: "{{ repeat.item }}"
           data:
             title: "Výmena filtra čističky vzduchu"
-            message: >
-              Filter sensors: {{ filter_sensors_debug }}
-              Count: {{ filter_sensors_count }}
+            message: "{{ message_text }}"
 
 mode: queued
 max: 10
