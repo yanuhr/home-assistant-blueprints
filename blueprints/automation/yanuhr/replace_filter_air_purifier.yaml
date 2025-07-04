@@ -59,26 +59,32 @@ action:
       notification_services: !input notification_services
       memory_helper: !input memory_helper
       already_notified: >
-        {% if states(memory_helper) != '' %}
-          {{ states(memory_helper).split(',') | map('trim') | list }}
+        {% set helper_value = states(memory_helper) %}
+        {% if helper_value and helper_value != 'unknown' and helper_value != 'None' and helper_value != '' %}
+          {{ helper_value.split(',') | map('trim') | list }}
         {% else %}
           {{ [] }}
         {% endif %}
-      triggered_sensors: >
-        {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list %}
-        {{ active_sensors }}
+      active_sensors: >
+        {% set active = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list %}
+        {{ active }}
+      cleaned_notified: >
+        {% set cleaned = [] %}
+        {% for sensor in already_notified %}
+          {% if sensor in filter_sensors and states(sensor) == 'on' %}
+            {% set cleaned = cleaned + [sensor] %}
+          {% endif %}
+        {% endfor %}
+        {{ cleaned }}
       new_notifications: >
-        {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list %}
-        {% set not_notified = active_sensors | reject('in', already_notified) | list %}
+        {% set not_notified = active_sensors | reject('in', cleaned_notified) | list %}
         {{ not_notified }}
       filter_locations: >
         {% set locations = [] %}
         {% for sensor in new_notifications %}
-          {% if 'replace_filter' in sensor %}
-            {% set room = area_name(sensor) | default('Neznáma miestnosť') %}
-            {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
-            {% set locations = locations + [room ~ " – " ~ name] %}
-          {% endif %}
+          {% set room = area_name(sensor) | default('Neznáma miestnosť') %}
+          {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
+          {% set locations = locations + [room ~ " – " ~ name] %}
         {% endfor %}
         {{ locations | list }}
 
@@ -99,23 +105,12 @@ action:
                     Vymeň filter v týchto čističkách: {{ filter_locations | join(', ') }}
                   {% endif %}
 
-      - service: input_text.set_value
-        data:
-          entity_id: "{{ memory_helper }}"
-          value: >
-            {% set updated_list = already_notified + new_notifications %}
-            {{ updated_list | unique | join(',') }}
-
-  - if:
-      - condition: template
-        value_template: "{{ trigger is defined and trigger.platform == 'state' and trigger.to_state.state == 'off' }}"
-    then:
-      - service: input_text.set_value
-        data:
-          entity_id: "{{ memory_helper }}"
-          value: >
-            {% set filtered_list = already_notified | reject('eq', trigger.entity_id) | list %}
-            {{ filtered_list | join(',') }}
+  - service: input_text.set_value
+    data:
+      entity_id: "{{ memory_helper }}"
+      value: >
+        {% set updated_list = cleaned_notified + new_notifications %}
+        {{ updated_list | unique | join(',') }}
 
 mode: queued
 max: 10
