@@ -66,26 +66,6 @@ condition:
             value_template: "{{ immediate_notification }}"
 
 action:
-  - variables:
-      active_sensors: >
-        {% set active = [] %}
-        {% for sensor in filter_sensors %}
-          {% if is_state(sensor, 'on') %}
-            {% set active = active + [sensor] %}
-          {% endif %}
-        {% endfor %}
-        {{ active }}
-      sensor_count: "{{ active_sensors | count }}"
-      debug_info: >
-        {% set debug = [] %}
-        {% for sensor in active_sensors %}
-          {% set entity_state = states(sensor) %}
-          {% set room = area_name(sensor) %}
-          {% set friendly_name = entity_state.attributes.friendly_name %}
-          {% set debug = debug + [sensor ~ "|room:" ~ room ~ "|name:" ~ friendly_name] %}
-        {% endfor %}
-        {{ debug }}
-
   - repeat:
       for_each: !input notification_services
       sequence:
@@ -93,11 +73,9 @@ action:
           data:
             title: "Výmena filtra čističky vzduchu"
             message: >
-              {% if sensor_count == '1' %}
-                Debug: {{ debug_info[0] }} - Vymeň filter v čističke vzduchu!
-              {% else %}
-                Debug info: {{ debug_info | join(', ') }}
-              {% endif %}
+              Filter sensors: {{ filter_sensors }}
+              Active sensors: {{ filter_sensors | select('is_state', 'on') | list }}
+              Count: {{ (filter_sensors | select('is_state', 'on') | list) | count }}
 
 mode: queued
 max: 10
