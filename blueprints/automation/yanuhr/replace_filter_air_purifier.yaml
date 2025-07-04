@@ -76,10 +76,15 @@ action:
         {% endfor %}
         {{ active }}
       sensor_count: "{{ active_sensors | count }}"
-      sensor_list: >
+      device_info: >
+        {% set info = [] %}
         {% for sensor in active_sensors %}
-          {{ sensor }}{% if not loop.last %}, {% endif %}
+          {% set entity_state = states(sensor) %}
+          {% set room = area_name(sensor) | default("Neznáma miestnosť") %}
+          {% set device_name = entity_state.attributes.friendly_name | default(sensor) %}
+          {% set info = info + [room ~ " – " ~ device_name] %}
         {% endfor %}
+        {{ info }}
 
   - repeat:
       for_each: !input notification_services
@@ -89,9 +94,9 @@ action:
             title: "Výmena filtra čističky vzduchu"
             message: >
               {% if sensor_count == '1' %}
-                Senzor: {{ active_sensors[0] }} - Vymeň filter v čističke vzduchu!
+                {{ device_info[0] }}: Vymeň filter v čističke vzduchu!
               {% else %}
-                Vymeň filter v týchto čističkách: {{ sensor_list }}
+                Vymeň filter v týchto čističkách: {{ device_info | join(', ') }}
               {% endif %}
 
 mode: queued
