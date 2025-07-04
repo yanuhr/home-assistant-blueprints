@@ -51,7 +51,7 @@ trigger:
 condition:
   - condition: template
     value_template: >
-      {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | list %}
+      {% set active_sensors = filter_sensors | select('is_state', 'on') | list %}
       {{ active_sensors | length > 0 and notification_services | length > 0 }}
 
   - condition: or
@@ -68,13 +68,13 @@ condition:
 action:
   - variables:
       active_sensors: >
-        {% set active = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | list %}
+        {% set active = filter_sensors | select('is_state', 'on') | list %}
         {{ active }}
       filter_locations: >
         {% set locations = [] %}
-        {% for sensor in active_sensors %}
-          {% set room = area_name(sensor.entity_id) | default('Neznáma miestnosť') %}
-          {% set name = sensor.attributes.friendly_name | default(sensor.entity_id) %}
+        {% for sensor_id in active_sensors %}
+          {% set room = area_name(sensor_id) | default('Neznáma miestnosť') %}
+          {% set name = state_attr(sensor_id, 'friendly_name') | default(sensor_id) %}
           {% set locations = locations + [room ~ " – " ~ name] %}
         {% endfor %}
         {{ locations }}
