@@ -58,11 +58,13 @@ action:
           {{ '' }}
         {% elif active_sensors | count == 1 %}
           {% set s = active_sensors[0] %}
-          {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.attributes.friendly_name | default(s.name) | default(s.entity_id) }}: Vymeň filter v čističke vzduchu!
+          {% set s_obj = states[s] if s is string else s %}
+          {{ area_name(s_obj.entity_id) | default("Neznáma miestnosť") }} – {{ s_obj.attributes.friendly_name | default(s_obj.name) | default(s_obj.entity_id) }}: Vymeň filter v čističke vzduchu!
         {% else %}
           Vymeň filter v týchto čističkách:
           {% for s in active_sensors %}
-          - entity_id: {{ s.entity_id }}, name: {{ s.attributes.friendly_name | default(s.name) | default(s.entity_id) }}, area: {{ area_name(s.entity_id) | default("Neznáma miestnosť") }}
+            {% set s_obj = states[s] if s is string else s %}
+            - entity_id: {{ s_obj.entity_id }}, name: {{ s_obj.attributes.friendly_name | default(s_obj.name) | default(s_obj.entity_id) }}, area: {{ area_name(s_obj.entity_id) | default("Neznáma miestnosť") }}
           {% endfor %}
         {% endif %}
   - choose:
