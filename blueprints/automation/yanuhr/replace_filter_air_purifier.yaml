@@ -3,6 +3,7 @@ blueprint:
   description: >
     Automaticky upozorňuje na potrebu výmeny filtra v čističke vzduchu.
     Podporuje viacero senzorov a notifikačných služieb.
+    Stateless riešenie bez pamäťovej logiky.
 
   domain: automation
   input:
@@ -31,12 +32,12 @@ blueprint:
       selector:
         time: {}
 
-    memory_helper:
-      name: Memory Helper
-      description: Entita input_text na ukladanie už notifikovaných senzorov
+    immediate_notification:
+      name: Okamžitá notifikácia
+      description: Poslať notifikáciu okamžite po prepnutí senzora na "on"
+      default: true
       selector:
-        entity:
-          domain: input_text
+        boolean: {}
 
 trigger:
   - platform: state
@@ -51,46 +52,36 @@ condition:
   - condition: template
     value_template: >
       {% set active_sensors = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | list %}
-      {{ active_sensors | length > 0 }}
+      {{ active_sensors | length > 0 and notification_services | length > 0 }}
+
+  - condition: or
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.platform == 'time' }}"
+      - condition: and
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.platform == 'state' }}"
+          - condition: template
+            value_template: "{{ immediate_notification }}"
 
 action:
   - variables:
-      filter_sensors: !input filter_sensors
-      notification_services: !input notification_services
-      memory_helper: !input memory_helper
-      already_notified: >
-        {% set helper_value = states(memory_helper) %}
-        {% if helper_value and helper_value != 'unknown' and helper_value != 'None' and helper_value != '' %}
-          {{ helper_value.split(',') | map('trim') | list }}
-        {% else %}
-          {{ [] }}
-        {% endif %}
       active_sensors: >
-        {% set active = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list %}
+        {% set active = states | selectattr('entity_id', 'in', filter_sensors) | selectattr('state', 'eq', 'on') | list %}
         {{ active }}
-      cleaned_notified: >
-        {% set cleaned = [] %}
-        {% for sensor in already_notified %}
-          {% if sensor in filter_sensors and states(sensor) == 'on' %}
-            {% set cleaned = cleaned + [sensor] %}
-          {% endif %}
-        {% endfor %}
-        {{ cleaned }}
-      new_notifications: >
-        {% set not_notified = active_sensors | reject('in', cleaned_notified) | list %}
-        {{ not_notified }}
       filter_locations: >
         {% set locations = [] %}
-        {% for sensor in new_notifications %}
-          {% set room = area_name(sensor) | default('Neznáma miestnosť') %}
-          {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
+        {% for sensor in active_sensors %}
+          {% set room = area_name(sensor.entity_id) | default('Neznáma miestnosť') %}
+          {% set name = sensor.attributes.friendly_name | default(sensor.entity_id) %}
           {% set locations = locations + [room ~ " – " ~ name] %}
         {% endfor %}
-        {{ locations | list }}
+        {{ locations }}
 
   - if:
       - condition: template
-        value_template: "{{ notification_services | length > 0 and filter_locations | length > 0 }}"
+        value_template: "{{ filter_locations | length > 0 }}"
     then:
       - repeat:
           for_each: "{{ notification_services }}"
@@ -104,13 +95,6 @@ action:
                   {% else %}
                     Vymeň filter v týchto čističkách: {{ filter_locations | join(', ') }}
                   {% endif %}
-
-  - service: input_text.set_value
-    data:
-      entity_id: "{{ memory_helper }}"
-      value: >
-        {% set updated_list = cleaned_notified + new_notifications %}
-        {{ updated_list | unique | join(',') }}
 
 mode: queued
 max: 10
