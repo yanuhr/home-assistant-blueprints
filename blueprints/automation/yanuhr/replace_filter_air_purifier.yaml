@@ -66,17 +66,6 @@ condition:
             value_template: "{{ immediate_notification }}"
 
 action:
-  - variables:
-      active_sensors: >
-        {% set active = [] %}
-        {% for sensor in filter_sensors %}
-          {% if is_state(sensor, 'on') %}
-            {% set active = active + [sensor] %}
-          {% endif %}
-        {% endfor %}
-        {{ active }}
-      sensor_count: "{{ active_sensors | count }}"
-
   - repeat:
       for_each: !input notification_services
       sequence:
@@ -84,9 +73,12 @@ action:
           data:
             title: "Výmena filtra čističky vzduchu"
             message: >
-              Filter sensors: {{ filter_sensors }}
-              Active sensors: {{ active_sensors }}
-              Count: {{ sensor_count }}
+              {% set debug_info = [] %}
+              {% for sensor in filter_sensors %}
+                {% set state = states(sensor) %}
+                {% set debug_info = debug_info + [sensor ~ "=" ~ state.state] %}
+              {% endfor %}
+              Sensors: {{ debug_info | join(', ') }}
 
 mode: queued
 max: 10
