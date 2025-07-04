@@ -48,18 +48,6 @@ trigger:
   - platform: time
     at: !input notification_time
 
-condition:
-  - condition: or
-    conditions:
-      - condition: template
-        value_template: "{{ trigger.platform == 'time' }}"
-      - condition: and
-        conditions:
-          - condition: template
-            value_template: "{{ trigger.platform == 'state' }}"
-          - condition: template
-            value_template: "{{ true }}"
-
 action:
   - variables:
       entities: !input filter_sensors
