@@ -1,16 +1,13 @@
 blueprint:
   name: Upozornenie na výmenu filtra v čističke vzduchu
   description: >
-    Automaticky upozorňuje používateľa, keď je potrebné vymeniť filter v čističke vzduchu.
-    Podporuje viacero senzorov a viacero notifikačných služieb.
-    Pracuje výlučne so stavom 'on' binárnych senzorov, ktoré signalizujú potrebu výmeny filtra.
-    Stateless riešenie bez pamäťovej logiky.
-
+    Upozornenie na výmenu filtra pre viacero čističiek vzduchu na základe stavu binárnych senzorov.
+    Odosiela notifikáciu, ak je aspoň jeden senzor v stave "on", buď okamžite alebo v určený čas.
   domain: automation
   input:
     filter_sensors:
       name: Senzory filtra
-      description: Vyberte senzory filtra, ktoré chcete monitorovať
+      description: Vyberte binárne senzory, ktoré signalizujú potrebu výmeny filtra
       selector:
         entity:
           domain: binary_sensor
@@ -18,24 +15,20 @@ blueprint:
 
     notification_services:
       name: Notifikačné služby
-      description: >
-        Zadajte názvy notifikačných služieb (napr. notify.mobile_app_pixel).
-        Môžete zadať viacero služieb, každú na nový riadok.
+      description: Zadajte služby na odoslanie (napr. notify.mobile_app_pixel)
       default: []
       selector:
         text:
           multiple: true
 
     notification_time:
-      name: Čas notifikácie
-      description: Kedy sa má notifikácia odosielať (raz denne)
+      name: Čas dennej notifikácie
       default: "08:00:00"
       selector:
         time: {}
 
     immediate_notification:
       name: Okamžitá notifikácia
-      description: Poslať notifikáciu okamžite po prepnutí senzora na "on"
       default: true
       selector:
         boolean: {}
@@ -53,53 +46,43 @@ condition: []
 
 action:
   - variables:
-      entities: !input filter_sensors
-      notification_services: !input notification_services
-      immediate_notification: !input immediate_notification
       active_sensors: >
-        {{ expand(entities) | selectattr('state', 'eq', 'on') | list }}
-      sensors_sorted: >
-        {{ expand(entities)
-          | selectattr('state', 'eq', 'on')
-          | sort(attribute='attributes.friendly_name')
-          | list }}
+        {% set result = namespace(list=[]) %}
+        {% for e in expand(!input filter_sensors) %}
+          {% if e.state == 'on' %}
+            {% set result.list = result.list + [e] %}
+          {% endif %}
+        {% endfor %}
+        {{ result.list }}
+
       message_text: >
-        {% if sensors_sorted | count == 0 %}
+        {% if active_sensors | count == 0 %}
           {{ '' }}
-        {% elif sensors_sorted | count == 1 %}
-          {% set s = sensors_sorted[0] %}
-          {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.attributes.friendly_name | default(s.entity_id) }}: Vymeň filter v čističke vzduchu!
+        {% elif active_sensors | count == 1 %}
+          {% set s = active_sensors[0] %}
+          {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter v čističke vzduchu!
         {% else %}
           Vymeň filter v týchto čističkách:
-          {% for s in sensors_sorted %}
-            • {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.attributes.friendly_name | default(s.entity_id) }}
+          {% for s in active_sensors %}
+            • {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}
           {% endfor %}
         {% endif %}
+
   - choose:
       - conditions:
           - condition: template
             value_template: "{{ active_sensors | count > 0 }}"
           - condition: template
-            value_template: "{{ notification_services | count > 0 }}"
-          - condition: or
-            conditions:
-              - condition: template
-                value_template: "{{ trigger.platform != 'state' }}"
-              - condition: template
-                value_template: "{{ (trigger.platform == 'state') and (immediate_notification | bool) }}"
+            value_template: >
+              {{ trigger.platform != 'state' or (!input immediate_notification | bool == false and trigger.platform == 'state') == false }}
         sequence:
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ message_text | trim != '' }}"
-                sequence:
-                  - repeat:
-                      for_each: "{{ notification_services }}"
-                      sequence:
-                        - service: "{{ repeat.item }}"
-                          data:
-                            title: "Výmena filtra čističky vzduchu"
-                            message: "{{ message_text }}"
+          - repeat:
+              for_each: !input notification_services
+              sequence:
+                - service: "{{ repeat.item }}"
+                  data:
+                    title: "Výmena filtra čističky vzduchu"
+                    message: "{{ message_text }}"
 
 mode: queued
 max: 10
