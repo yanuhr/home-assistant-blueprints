@@ -94,6 +94,7 @@ action:
             window_sensor: "{{ repeat.item.window_sensor | default('') }}"
             cover: "{{ repeat.item.cover }}"
             sensor_id: "{{ window_sensor if window_sensor != '' else 'žiadny senzor' }}"
+            changed_seconds_ago: "{{ (now() - states[window_sensor].last_changed).total_seconds() if window_sensor != '' and is_state(window_sensor, 'off') else 0 }}"
 
         - choose:
             - alias: "Rozjasnenie - otvorenie"
@@ -185,6 +186,8 @@ action:
                   value_template: "{{ (is_dark and is_daytime) or after_sunset }}"
                 - condition: template
                   value_template: "{{ window_sensor != '' and is_state(window_sensor, 'off') }}"
+                - condition: template
+                  value_template: "{{ changed_seconds_ago >= 30 }}"
               sequence:
                 - service: logbook.log
                   data:
