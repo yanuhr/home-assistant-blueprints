@@ -146,7 +146,7 @@ action:
                   target:
                     entity_id: "{{ cover }}"
 
-            - alias: "Stmievanie alebo západ slnka - čakanie na zatvorenie okna"
+            - alias: "Stmievanie alebo západ slnka - okno otvorené"
               conditions:
                 - condition: template
                   value_template: "{{ (is_dark and is_daytime) or after_sunset }}"
@@ -157,7 +157,7 @@ action:
                   data:
                     name: "Adaptívne tienenie"
                     message: >-
-                      Rozhodnutie: Čakanie na zatvorenie okna v miestnosti {{ name }}
+                      Rozhodnutie: Okno otvorené v miestnosti {{ name }}
                       - Miestnosť: {{ name }}
                       - Roleta: {{ cover }}
                       - Senzor okna: {{ sensor_id }}
@@ -176,25 +176,30 @@ action:
                           message: >-
                             Rolety v miestnosti {{ name }} sa nezatiahnu, pretože je otvorené okno.
                             Po jeho zatvorení sa roleta automaticky zatiahne o 30 sekúnd.
-                - wait_template: "{{ is_state(window_sensor, 'off') }}"
-                  timeout: "00:05:00"
-                  continue_on_timeout: false
-                - delay:
-                    seconds: 30
+
+            - alias: "Stmievanie alebo západ slnka - zatvorenie s delay"
+              conditions:
+                - condition: template
+                  value_template: "{{ (is_dark and is_daytime) or after_sunset }}"
+                - condition: template
+                  value_template: "{{ window_sensor != '' and is_state(window_sensor, 'off') }}"
+              sequence:
                 - service: logbook.log
                   data:
                     name: "Adaptívne tienenie"
                     message: >-
-                      Rozhodnutie: Zatvorenie rolety po zatvorení okna v miestnosti {{ name }}
+                      Rozhodnutie: Zatvorenie rolety s delay v miestnosti {{ name }}
                       - Miestnosť: {{ name }}
                       - Roleta: {{ cover }}
                       - Senzor okna: {{ sensor_id }}
                       - Osvetlenie: {{ lux }} lux
                       - Stav okna: zatvorené
                       - Príznaky: is_daytime={{ is_daytime }}, is_bright={{ is_bright }}, is_dark={{ is_dark }}, after_sunset={{ after_sunset }}
-                      - Dôvod: Okno bolo zatvorené
+                      - Dôvod: Nízka úroveň osvetlenia alebo západ slnka, okno zatvorené, delay 30s
                 - condition: template
                   value_template: "{{ not is_state(cover, 'closed') }}"
+                - delay:
+                    seconds: 30
                 - service: cover.close_cover
                   target:
                     entity_id: "{{ cover }}"
