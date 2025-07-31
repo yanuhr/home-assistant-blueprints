@@ -152,6 +152,8 @@ action:
                   value_template: "{{ (is_dark and is_daytime) or after_sunset }}"
                 - condition: template
                   value_template: "{{ window_sensor != '' and is_state(window_sensor, 'on') }}"
+                - condition: template
+                  value_template: "{{ not is_state(cover, 'closed') }}"
               sequence:
                 - service: logbook.log
                   data:
