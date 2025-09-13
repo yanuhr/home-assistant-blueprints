@@ -12,10 +12,9 @@ blueprint:
       description: Vyberte senzory batérií, ktoré chcete monitorovať
       selector:
         entity:
-          domain: sensor
-          device_class:
-            - battery
           multiple: true
+          filter:
+            - domain: sensor
 
     threshold:
       name: Prah batérie (%)
