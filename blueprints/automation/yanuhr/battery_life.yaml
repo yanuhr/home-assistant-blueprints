@@ -9,10 +9,12 @@ blueprint:
   input:
     battery_sensors:
       name: Senzory batérií
+      description: Vyberte senzory batérií, ktoré chcete monitorovať
       selector:
         entity:
           domain: sensor
-          device_class: battery
+          device_class:
+            - battery
           multiple: true
 
     threshold:
@@ -69,7 +71,7 @@ variables:
     {% if raw | trim in ['', 'unknown', 'unavailable', 'none'] %}
       []
     {% else %}
-      {{ raw | from_json }}
+      {{ raw | from_json(default=[]) }}
     {% endif %}
 
 mode: single
@@ -132,7 +134,9 @@ action:
                         title: "Upozornenie: Nízka batéria"
                         message: >-
                           Zariadenia pod {{ threshold }}%:
-                          {% for n in low_batteries %}- {{ n }}
+
+                          {% for n in low_batteries %}
+                          - {{ n }}
                           {% endfor %}
             else:
               - condition: template
@@ -142,7 +146,9 @@ action:
                   title: "Upozornenie: Nízka batéria"
                   message: >-
                     Zariadenia pod {{ threshold }}%:
-                    {% for n in low_batteries %}- {{ n }}
+
+                    {% for n in low_batteries %}
+                    - {{ n }}
                     {% endfor %}
 
   - choose:
@@ -160,7 +166,9 @@ action:
                         title: "Batéria obnovená"
                         message: >-
                           Zariadenia opäť nad {{ threshold }}%:
-                          {% for n in recovered_batteries %}- {{ n }}
+
+                          {% for n in recovered_batteries %}
+                          - {{ n }}
                           {% endfor %}
             else:
               - condition: template
@@ -170,7 +178,9 @@ action:
                   title: "Batéria obnovená"
                   message: >-
                     Zariadenia opäť nad {{ threshold }}%:
-                    {% for n in recovered_batteries %}- {{ n }}
+
+                    {% for n in recovered_batteries %}
+                    - {{ n }}
                     {% endfor %}
 
   - service: input_text.set_value
