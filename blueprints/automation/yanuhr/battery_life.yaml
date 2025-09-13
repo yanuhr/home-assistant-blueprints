@@ -1,16 +1,14 @@
 blueprint:
-  name: Monitorovanie stavu batérií (opravené)
+  name: Monitorovanie stavu batérií (opravené v2)
   description: >
     Denne kontroluje vybrané batériové senzory a odosiela notifikácie,
     ak je úroveň pod prahom. Upozornenia sa opakujú, kým sa batéria
-    „neobnoví“ (stúpne nad prah). Používa JSON „pamäť“ v input_text.
-
+    neobnoví (stúpne nad prah). Pamäť je JSON zoznam v input_text.
   domain: automation
 
   input:
     battery_sensors:
       name: Senzory batérií
-      description: Vyber konkrétne senzorové entity s device_class=battery
       selector:
         entity:
           domain: sensor
@@ -19,7 +17,6 @@ blueprint:
 
     threshold:
       name: Prah batérie (%)
-      description: Pod touto hodnotou sa posiela upozornenie
       default: 15
       selector:
         number:
@@ -37,23 +34,22 @@ blueprint:
 
     notification_services:
       name: Notifikačné služby
-      description: >
-        Napr. notify.mobile_app_iphone_jan. Každú službu na nový riadok.
+      description: Každú službu (napr. notify.mobile_app_xyz) na nový riadok.
       default: []
       selector:
         text:
           multiple: true
 
     use_persistent_fallback:
-      name: Použiť persistent_notification ako fallback
-      description: Ak nie sú zadané žiadne notify služby, urobí sa trvalá notifikácia v HA.
+      name: Persistentný fallback
+      description: Ak nie sú zadané notify služby, vytvorí sa persistentná notifikácia v HA.
       default: true
       selector:
         boolean: {}
 
     memory_helper:
       name: Input text pre pamäť
-      description: input_text, kde sa bude ukladať JSON zoznam už notifikovaných entít.
+      description: input_text, kde sa ukladá JSON zoznam už notifikovaných entít.
       selector:
         entity:
           domain: input_text
@@ -68,11 +64,13 @@ variables:
   sensors: !input battery_sensors
   notify_services: !input notification_services
   use_persistent_fallback: !input use_persistent_fallback
-  # Načítaj JSON zoznam z input_text; ak je prázdny/neplatný, použi [].
   memory_list: >-
-    {% set raw = states(memory_helper) | default('[]') %}
-    {% set parsed = raw | from_json(default=None) %}
-    {{ parsed if parsed is not none and parsed is iterable else [] }}
+    {% set raw = states(memory_helper) | string %}
+    {% if raw | trim in ['', 'unknown', 'unavailable', 'none'] %}
+      []
+    {% else %}
+      {{ raw | from_json }}
+    {% endif %}
 
 mode: single
 
@@ -90,8 +88,15 @@ action:
             name: "{{ state_attr(repeat.item, 'friendly_name') or repeat.item }}"
             lvl: >-
               {% set v = states(repeat.item) %}
-              {{ (v | float(100)) if (v is number or v|string|lower not in ['unknown','unavailable','none']) else 100 }}
+              {% if v is number %}
+                {{ v | float }}
+              {% elif (v|string|lower) in ['unknown','unavailable','none'] %}
+                100
+              {% else %}
+                {{ v | float(100) }}
+              {% endif %}
             was_notified: "{{ ent in updated_memory }}"
+
         - if:
             - condition: template
               value_template: "{{ lvl < threshold }}"
@@ -103,22 +108,21 @@ action:
                 - variables:
                     low_batteries: "{{ low_batteries + [name] }}"
                     updated_memory: "{{ updated_memory + [ent] }}"
-        - else:
+          else:
             - if:
                 - condition: template
                   value_template: "{{ was_notified }}"
               then:
                 - variables:
                     recovered_batteries: "{{ recovered_batteries + [name] }}"
-                    updated_memory: "{{ updated_memory | select('ne', ent) | list }}"
+                    updated_memory: "{{ updated_memory | reject('equalto', ent) | list }}"
 
-  # NOTIFIKÁCIE – nízke batérie
   - choose:
-      - conditions: "{{ (low_batteries | length) > 0 }}"
+      - conditions: "{{ low_batteries | length > 0 }}"
         sequence:
           - if:
               - condition: template
-                value_template: "{{ (notify_services | length) > 0 }}"
+                value_template: "{{ notify_services | length > 0 }}"
             then:
               - repeat:
                   for_each: "{{ notify_services }}"
@@ -141,13 +145,12 @@ action:
                     {% for n in low_batteries %}- {{ n }}
                     {% endfor %}
 
-  # NOTIFIKÁCIE – obnovené batérie
   - choose:
-      - conditions: "{{ (recovered_batteries | length) > 0 }}"
+      - conditions: "{{ recovered_batteries | length > 0 }}"
         sequence:
           - if:
               - condition: template
-                value_template: "{{ (notify_services | length) > 0 }}"
+                value_template: "{{ notify_services | length > 0 }}"
             then:
               - repeat:
                   for_each: "{{ notify_services }}"
@@ -170,7 +173,6 @@ action:
                     {% for n in recovered_batteries %}- {{ n }}
                     {% endfor %}
 
-  # Ulož aktualizovanú pamäť ako JSON
   - service: input_text.set_value
     target:
       entity_id: !input memory_helper
