@@ -86,14 +86,12 @@ action:
         {% set services = notify_services | default([]) %}
         {{ services | map('string') | map('trim') | reject('equalto','') | unique | list }}
 
-      active_sensors: >-
+      # DÔLEŽITÉ: bez medzikroku "active_sensors" -> odstráni 'str object has no attribute entity_id'
+      active_ids: >-
         {{ expand(sensors)
             | selectattr('state','eq','on')
+            | map(attribute='entity_id')
             | list }}
-
-      active_ids: >-
-        {{ active_sensors | map(attribute='entity_id') | list }}
-
 
       should_notify: >-
         {% if run_id in ['daily','manual'] %}
@@ -110,38 +108,33 @@ action:
           {{ '' }}
         {% elif total == 1 %}
           {% set eid = active_ids[0] %}
-
-          {% set did = device_id(eid) | default(none) %}
-          {% set ents = (device_entities(did) if did else []) %}
-          {% set fan_eid = (ents | select('match','^fan\\.') | list | first) | default(none) %}
+          {% set did = device_id(eid) %}
+          {% set ents = device_entities(did) if did else [] %}
+          {% set fan_list = (ents | select('match','^fan\\.') | list) %}
+          {% set fan_eid = (fan_list[0] if (fan_list | length) > 0 else none) %}
 
           {% set dev_name = (device_attr(did,'name') if did else none) %}
           {% set fan_name = (state_attr(fan_eid,'friendly_name') if fan_eid else none) %}
           {% set bin_name = state_attr(eid,'friendly_name') %}
-
           {% set name = (fan_name or dev_name or bin_name or eid) %}
 
-          {# Area preferuj z device (stabilnejšie než z entity), fallback na sensor #}
-          {% set ar = (area_name(did) if did else area_name(eid)) %}
-
+          {% set ar = (area_name(fan_eid) if fan_eid else area_name(eid)) %}
           {{ (ar ~ ' – ' if ar else '') ~ name ~ ': vymeň filter.' }}
-
         {% else %}
           {% set shown = active_ids[0:max_items] %}
           Vymeň filter v týchto čističkách:
           {% for eid in shown %}
-
-            {% set did = device_id(eid) | default(none) %}
-            {% set ents = (device_entities(did) if did else []) %}
-            {% set fan_eid = (ents | select('match','^fan\\.') | list | first) | default(none) %}
+            {% set did = device_id(eid) %}
+            {% set ents = device_entities(did) if did else [] %}
+            {% set fan_list = (ents | select('match','^fan\\.') | list) %}
+            {% set fan_eid = (fan_list[0] if (fan_list | length) > 0 else none) %}
 
             {% set dev_name = (device_attr(did,'name') if did else none) %}
             {% set fan_name = (state_attr(fan_eid,'friendly_name') if fan_eid else none) %}
             {% set bin_name = state_attr(eid,'friendly_name') %}
-
             {% set name = (fan_name or dev_name or bin_name or eid) %}
-            {% set ar = (area_name(did) if did else area_name(eid)) %}
 
+            {% set ar = (area_name(fan_eid) if fan_eid else area_name(eid)) %}
             - {{ (ar ~ ' – ' if ar else '') ~ name }}
           {% endfor %}
           {% if total > (shown | length) %}
