@@ -1,15 +1,15 @@
 blueprint:
-  name: Monitorovanie stavu batérií (opravené v3)
+  name: Battery Monitor v4
   description: >
-    Denne kontroluje vybrané batériové senzory a odosiela notifikácie,
-    ak je úroveň pod prahom. Upozornenia sa opakujú, kým sa batéria
-    neobnoví (stúpne nad prah). Pamäť je JSON zoznam v input_text.
+    Monitors battery sensors and sends notifications when battery level
+    is below threshold. Notifications repeat daily until battery recovers.
+    Memory is stored as JSON list in input_text.
   domain: automation
 
   input:
     battery_sensors:
-      name: Senzory batérií
-      description: Vyberte senzory batérií, ktoré chcete monitorovať
+      name: Battery Sensors
+      description: Select battery sensors to monitor
       selector:
         entity:
           multiple: true
@@ -18,7 +18,7 @@ blueprint:
             - device_class: battery
 
     threshold:
-      name: Prah batérie (%)
+      name: Battery Threshold (%)
       default: 20
       selector:
         number:
@@ -29,32 +29,39 @@ blueprint:
           step: 1
 
     notification_time:
-      name: Čas notifikácie
+      name: Notification Time
       default: "08:00:00"
       selector:
         time: {}
 
     notification_services:
-      name: Notifikačné služby
-      description: Každú službu (napr. notify.mobile_app_xyz) na nový riadok.
+      name: Notification Services
+      description: List of notification services (e.g., notify.mobile_app_x), one per line
       default: []
       selector:
         text:
           multiple: true
 
     use_persistent_fallback:
-      name: Persistentný fallback
-      description: Ak nie sú zadané notify služby, vytvorí sa persistentná notifikácia v HA.
+      name: Use Persistent Fallback
+      description: If no notification services provided, create persistent notification in HA
       default: true
       selector:
         boolean: {}
 
     memory_helper:
-      name: Input text pre pamäť
-      description: input_text, kde sa ukladá JSON zoznam momentálne nízkych batérií z posledného behu.
+      name: Memory Helper
+      description: input_text entity where JSON list of currently low batteries is stored
       selector:
         entity:
           domain: input_text
+
+    debug:
+      name: Debug Mode
+      description: Enable debug notifications for invalid entities
+      default: false
+      selector:
+        boolean: {}
 
 trigger:
   - platform: time
@@ -62,20 +69,15 @@ trigger:
 
 variables:
   threshold: !input threshold
-  memory_helper: !input memory_helper
   sensors: !input battery_sensors
   notify_services: !input notification_services
   use_persistent_fallback: !input use_persistent_fallback
+  memory_helper: !input memory_helper
+  debug: !input debug
 
-mode: restart
+mode: single
 
 action:
-  - service: persistent_notification.create
-    data:
-      notification_id: "battery_automation_debug"
-      title: "Battery Automation Debug"
-      message: "battery automation started"
-
   - variables:
       notify_services_filtered: >-
         {% set services = notify_services | default([]) %}
@@ -99,152 +101,35 @@ action:
       current_low_batteries: []
       recovered_batteries: []
       unavailable_memory_entities: []
+      invalid_entities: []
 
   - repeat:
       for_each: "{{ sensors }}"
       sequence:
         - variables:
             ent: "{{ repeat.item }}"
-            attr_battery: "{{ state_attr(repeat.item, 'battery') }}"
-            attr_battery_level: "{{ state_attr(repeat.item, 'battery_level') }}"
-            attr_battery_percent: "{{ state_attr(repeat.item, 'battery_percent') }}"
-            attr_percentage: "{{ state_attr(repeat.item, 'percentage') }}"
-            raw_state: "{{ states(repeat.item) }}"
-            attr_used: >-
-              {% if attr_battery and attr_battery != 'unknown' and attr_battery != 'unavailable' and attr_battery != 'none' %}
-                battery
-              {% elif attr_battery_level and attr_battery_level != 'unknown' and attr_battery_level != 'unavailable' and attr_battery_level != 'none' %}
-                battery_level
-              {% elif attr_battery_percent and attr_battery_percent != 'unknown' and attr_battery_percent != 'unavailable' and attr_battery_percent != 'none' %}
-                battery_percent
-              {% elif attr_percentage and attr_percentage != 'unknown' and attr_percentage != 'unavailable' and attr_percentage != 'none' %}
-                percentage
-              {% else %}
-                none
-              {% endif %}
-            raw_attr: >-
-              {% if attr_battery and attr_battery != 'unknown' and attr_battery != 'unavailable' and attr_battery != 'none' %}
-                battery={{ attr_battery }}
-              {% elif attr_battery_level and attr_battery_level != 'unknown' and attr_battery_level != 'unavailable' and attr_battery_level != 'none' %}
-                battery_level={{ attr_battery_level }}
-              {% elif attr_battery_percent and attr_battery_percent != 'unknown' and attr_battery_percent != 'unavailable' and attr_battery_percent != 'none' %}
-                battery_percent={{ attr_battery_percent }}
-              {% elif attr_percentage and attr_percentage != 'unknown' and attr_percentage != 'unavailable' and attr_percentage != 'none' %}
-                percentage={{ attr_percentage }}
-              {% else %}
-                none
-              {% endif %}
+            raw: "{{ states(repeat.item) | string }}"
+            norm: "{{ raw | trim | lower | replace(',', '.') | replace('%', '') | replace(' ', '') }}"
             lvl: >-
-              {% set attr_val = none %}
-              {% if attr_battery and attr_battery != 'unknown' and attr_battery != 'unavailable' and attr_battery != 'none' %}
-                {% if attr_battery is number %}
-                  {% set attr_val = attr_battery %}
-                {% else %}
-                  {% set attr_str = (attr_battery | string | trim | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
-                  {% if attr_str %}
-                    {% set attr_float = attr_str | float(default=-1) %}
-                    {% if attr_float != -1 and attr_float >= 0 and attr_float <= 100 %}
-                      {% set attr_val = attr_float %}
-                    {% endif %}
-                  {% endif %}
-                {% endif %}
-              {% elif attr_battery_level and attr_battery_level != 'unknown' and attr_battery_level != 'unavailable' and attr_battery_level != 'none' %}
-                {% if attr_battery_level is number %}
-                  {% set attr_val = attr_battery_level %}
-                {% else %}
-                  {% set attr_str = (attr_battery_level | string | trim | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
-                  {% if attr_str %}
-                    {% set attr_float = attr_str | float(default=-1) %}
-                    {% if attr_float != -1 and attr_float >= 0 and attr_float <= 100 %}
-                      {% set attr_val = attr_float %}
-                    {% endif %}
-                  {% endif %}
-                {% endif %}
-              {% elif attr_battery_percent and attr_battery_percent != 'unknown' and attr_battery_percent != 'unavailable' and attr_battery_percent != 'none' %}
-                {% if attr_battery_percent is number %}
-                  {% set attr_val = attr_battery_percent %}
-                {% else %}
-                  {% set attr_str = (attr_battery_percent | string | trim | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
-                  {% if attr_str %}
-                    {% set attr_float = attr_str | float(default=-1) %}
-                    {% if attr_float != -1 and attr_float >= 0 and attr_float <= 100 %}
-                      {% set attr_val = attr_float %}
-                    {% endif %}
-                  {% endif %}
-                {% endif %}
-              {% elif attr_percentage and attr_percentage != 'unknown' and attr_percentage != 'unavailable' and attr_percentage != 'none' %}
-                {% if attr_percentage is number %}
-                  {% set attr_val = attr_percentage %}
-                {% else %}
-                  {% set attr_str = (attr_percentage | string | trim | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
-                  {% if attr_str %}
-                    {% set attr_float = attr_str | float(default=-1) %}
-                    {% if attr_float != -1 and attr_float >= 0 and attr_float <= 100 %}
-                      {% set attr_val = attr_float %}
-                    {% endif %}
-                  {% endif %}
-                {% endif %}
-              {% endif %}
-              {% if attr_val is not none %}
-                {{ attr_val }}
+              {% set v_float = norm | float(default=-1) %}
+              {% if v_float < 0 or v_float > 100 %}
+                -1
               {% else %}
-                {% set v = states(repeat.item) %}
-                {% set v_str = (v | string | trim | lower) %}
-                {% if v_str in ['unknown', 'unavailable', 'none', ''] %}
-                  -1
-                {% elif v is number %}
-                  {% if v >= 0 and v <= 100 %}
-                    {{ v | float }}
-                  {% else %}
-                    -1
-                  {% endif %}
-                {% else %}
-                  {% set v_normalized = (v_str | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
-                  {% if v_normalized %}
-                    {% set v_float = v_normalized | float(default=-1) %}
-                    {% if v_float != -1 and v_float >= 0 and v_float <= 100 %}
-                      {{ v_float }}
-                    {% else %}
-                      -1
-                    {% endif %}
-                  {% else %}
-                    -1
-                  {% endif %}
-                {% endif %}
+                {{ v_float }}
               {% endif %}
-            display_name: >-
-              {% set d_id = device_id(repeat.item) %}
-              {% set d_name = none %}
-              {% if d_id %}
-                {% set d_name = device_attr(d_id, 'name') %}
-              {% endif %}
-              {% if not d_name %}
-                {% set d_name = state_attr(repeat.item, 'friendly_name') or repeat.item %}
-              {% endif %}
-              {% set a = area_name(repeat.item) %}
-              {% if a %}
-                {{ a }} – {{ d_name }}
-              {% else %}
-                {{ d_name }}
-              {% endif %}
+            display_name: "{{ state_attr(repeat.item, 'friendly_name') or repeat.item }}"
+            unit_of_measurement: "{{ state_attr(repeat.item, 'unit_of_measurement') }}"
 
         - if:
             - condition: template
               value_template: "{{ lvl == -1 }}"
           then:
-            - service: persistent_notification.create
-              data:
-                notification_id: "battery_debug_{{ ent | replace('.', '_') | replace('-', '_') }}"
-                title: "Battery Debug - {{ ent }}"
-                message: >-
-                  ent: {{ ent }}
-                  raw_state: {{ raw_state }}
-                  raw_attr: {{ raw_attr }}
-                  lvl: {{ lvl }}
+            - variables:
+                invalid_entities: "{{ invalid_entities + [{'ent': ent, 'raw': raw, 'unit': unit_of_measurement}] }}"
 
         - if:
             - condition: template
-              value_template: "{{ lvl >= 0 and lvl < threshold }}"
+              value_template: "{{ lvl >= 0 and lvl <= threshold }}"
           then:
             - variables:
                 current_low_entities: "{{ current_low_entities + [ent] }}"
@@ -255,45 +140,16 @@ action:
       sequence:
         - variables:
             mem_ent: "{{ repeat.item }}"
+            mem_raw: "{{ states(repeat.item) | string }}"
+            mem_norm: "{{ mem_raw | trim | lower | replace(',', '.') | replace('%', '') | replace(' ', '') }}"
             mem_lvl: >-
-              {% set v = states(repeat.item) %}
-              {% set v_str = (v | string | trim | lower) %}
-              {% if v_str in ['unknown', 'unavailable', 'none', ''] %}
+              {% set v_float = mem_norm | float(default=-1) %}
+              {% if v_float < 0 or v_float > 100 %}
                 -1
-              {% elif v is number %}
-                {% if v >= 0 and v <= 100 %}
-                  {{ v | float }}
-                {% else %}
-                  -1
-                {% endif %}
               {% else %}
-                {% set v_normalized = (v_str | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
-                {% if v_normalized %}
-                  {% set v_float = v_normalized | float(default=-1) %}
-                  {% if v_float != -1 and v_float >= 0 and v_float <= 100 %}
-                    {{ v_float }}
-                  {% else %}
-                    -1
-                  {% endif %}
-                {% else %}
-                  -1
-                {% endif %}
+                {{ v_float }}
               {% endif %}
-            mem_display_name: >-
-              {% set d_id = device_id(repeat.item) %}
-              {% set d_name = none %}
-              {% if d_id %}
-                {% set d_name = device_attr(d_id, 'name') %}
-              {% endif %}
-              {% if not d_name %}
-                {% set d_name = state_attr(repeat.item, 'friendly_name') or repeat.item %}
-              {% endif %}
-              {% set a = area_name(repeat.item) %}
-              {% if a %}
-                {{ a }} – {{ d_name }}
-              {% else %}
-                {{ d_name }}
-              {% endif %}
+            mem_display_name: "{{ state_attr(repeat.item, 'friendly_name') or repeat.item }}"
 
         - if:
             - condition: template
@@ -308,13 +164,31 @@ action:
               else:
                 - if:
                     - condition: template
-                      value_template: "{{ mem_lvl >= 0 and mem_lvl >= threshold }}"
+                      value_template: "{{ mem_lvl >= 0 and mem_lvl > threshold + 2 }}"
                   then:
                     - variables:
                         recovered_batteries: "{{ recovered_batteries + [{'name': mem_display_name, 'lvl': mem_lvl}] }}"
 
   - variables:
       next_memory_entities: "{{ (current_low_entities + unavailable_memory_entities) | unique | list }}"
+
+  - if:
+      - condition: template
+        value_template: "{{ debug and invalid_entities | length > 0 }}"
+    then:
+      - service: persistent_notification.create
+        data:
+          notification_id: "battery_monitor_debug"
+          title: "Battery Monitor Debug - Invalid Entities"
+          message: >-
+            Invalid battery entities (check if *_battery_state was selected by mistake):
+
+            {% for item in invalid_entities %}
+            entity_id: {{ item.ent }}
+            raw state: {{ item.raw }}
+            unit: {{ item.unit }}
+
+            {% endfor %}
 
   - choose:
       - conditions: "{{ current_low_batteries | length > 0 }}"
@@ -328,9 +202,9 @@ action:
                   sequence:
                     - service: "{{ repeat.item }}"
                       data:
-                        title: "Upozornenie: Nízka batéria"
+                        title: "Low Battery Warning"
                         message: >-
-                          Zariadenia pod {{ threshold }}%:
+                          Devices below {{ threshold }}%:
 
                           {% for item in current_low_batteries %}
                           - {{ item.name }} ({{ item.lvl | round(0) }}%)
@@ -343,9 +217,9 @@ action:
                   - service: persistent_notification.create
                     data:
                       notification_id: "battery_low"
-                      title: "Upozornenie: Nízka batéria"
+                      title: "Low Battery Warning"
                       message: >-
-                        Zariadenia pod {{ threshold }}%:
+                        Devices below {{ threshold }}%:
 
                         {% for item in current_low_batteries %}
                         - {{ item.name }} ({{ item.lvl | round(0) }}%)
@@ -363,9 +237,9 @@ action:
                   sequence:
                     - service: "{{ repeat.item }}"
                       data:
-                        title: "Batéria obnovená"
+                        title: "Battery Recovered"
                         message: >-
-                          Zariadenia opäť nad {{ threshold }}%:
+                          Devices back above {{ threshold }}%:
 
                           {% for item in recovered_batteries %}
                           - {{ item.name }} ({{ item.lvl | round(0) }}%)
@@ -378,9 +252,9 @@ action:
                   - service: persistent_notification.create
                     data:
                       notification_id: "battery_recovered"
-                      title: "Batéria obnovená"
+                      title: "Battery Recovered"
                       message: >-
-                        Zariadenia opäť nad {{ threshold }}%:
+                        Devices back above {{ threshold }}%:
 
                         {% for item in recovered_batteries %}
                         - {{ item.name }} ({{ item.lvl | round(0) }}%)
