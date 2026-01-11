@@ -65,37 +65,43 @@ variables:
   memory_helper: !input memory_helper
   sensors: !input battery_sensors
   notify_services: !input notification_services
-  notify_services_filtered: >-
-    {% set services = notify_services | default([]) %}
-    {% set filtered = namespace(list=[]) %}
-    {% for svc in services %}
-      {% set svc_str = (svc | string | trim) %}
-      {% if svc_str and svc_str != '' %}
-        {% set _ = filtered.list.append(svc_str) %}
-      {% endif %}
-    {% endfor %}
-    {{ filtered.list }}
   use_persistent_fallback: !input use_persistent_fallback
-  memory_list: >-
-    {% set raw = states(memory_helper) | string %}
-    {% set raw_trimmed = raw | trim %}
-    {% if raw_trimmed in ['', 'unknown', 'unavailable', 'none'] %}
-      []
-    {% elif raw_trimmed is json %}
-      {% set parsed = raw_trimmed | from_json %}
-      {% if parsed is list %}
-        {{ parsed }}
-      {% else %}
-        []
-      {% endif %}
-    {% else %}
-      []
-    {% endif %}
 
-mode: single
+mode: restart
 
 action:
+  - service: persistent_notification.create
+    data:
+      notification_id: "battery_automation_debug"
+      title: "Battery Automation Debug"
+      message: "battery automation started"
+
   - variables:
+      notify_services_filtered: >-
+        {% set services = notify_services | default([]) %}
+        {% set filtered = namespace(list=[]) %}
+        {% for svc in services %}
+          {% set svc_str = (svc | string | trim) %}
+          {% if svc_str and svc_str != '' %}
+            {% set _ = filtered.list.append(svc_str) %}
+          {% endif %}
+        {% endfor %}
+        {{ filtered.list }}
+      memory_list: >-
+        {% set raw = states(memory_helper) | string %}
+        {% set raw_trimmed = raw | trim %}
+        {% if raw_trimmed in ['', 'unknown', 'unavailable', 'none'] %}
+          []
+        {% elif raw_trimmed | length >= 2 and raw_trimmed[0] == '[' and raw_trimmed[-1] == ']' %}
+          {% set parsed = raw_trimmed | from_json %}
+          {% if parsed is list %}
+            {{ parsed }}
+          {% else %}
+            []
+          {% endif %}
+        {% else %}
+          []
+        {% endif %}
       current_low_entities: []
       current_low_batteries: []
       recovered_batteries: []
