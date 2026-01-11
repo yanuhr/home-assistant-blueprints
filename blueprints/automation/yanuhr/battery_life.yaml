@@ -1,5 +1,5 @@
 blueprint:
-  name: Monitorovanie stavu batérií (opravené v2)
+  name: Monitorovanie stavu batérií (opravené v3)
   description: >
     Denne kontroluje vybrané batériové senzory a odosiela notifikácie,
     ak je úroveň pod prahom. Upozornenia sa opakujú, kým sa batéria
