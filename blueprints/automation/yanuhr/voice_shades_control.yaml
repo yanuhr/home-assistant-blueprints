@@ -212,10 +212,10 @@ action:
           {{ '' ~ '|||SEP|||' ~ room_part }}
         {% endif %}
       resolved_cover_raw: >-
-        {% set parts = resolved_data | split('|||SEP|||') %}
+        {% set parts = resolved_data.split('|||SEP|||') %}
         {{ (parts[0] | trim) if parts | length > 0 else '' }}
       resolved_room_name: >-
-        {% set parts = resolved_data | split('|||SEP|||') %}
+        {% set parts = resolved_data.split('|||SEP|||') %}
         {{ (parts[1] | trim) if parts | length > 1 else (room_slot | trim) }}
       resolved_cover: "{{ resolved_cover_raw if resolved_cover_raw is match('^cover\\.') else '' }}"
       resolved_cover_valid: "{{ resolved_cover_raw != '' and resolved_cover_raw is match('^cover\\.') }}"
@@ -258,14 +258,14 @@ action:
         sequence:
           - service: cover.open_cover
             target:
-              entity_id: "{{ covers_csv }}"
+              entity_id: "{{ covers_list_filtered }}"
       - conditions:
           - condition: template
             value_template: "{{ action_type == 'close_all' and covers_count | int > 0 }}"
         sequence:
           - service: cover.close_cover
             target:
-              entity_id: "{{ covers_csv }}"
+              entity_id: "{{ covers_list_filtered }}"
       - conditions:
           - condition: template
             value_template: "{{ action_type == 'set_position' and pos_valid and resolved_cover_valid }}"
