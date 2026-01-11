@@ -109,32 +109,77 @@ action:
             attr_battery_level: "{{ state_attr(repeat.item, 'battery_level') }}"
             attr_battery_percent: "{{ state_attr(repeat.item, 'battery_percent') }}"
             attr_percentage: "{{ state_attr(repeat.item, 'percentage') }}"
+            raw_state: "{{ states(repeat.item) }}"
+            attr_used: >-
+              {% if attr_battery and attr_battery != 'unknown' and attr_battery != 'unavailable' and attr_battery != 'none' %}
+                battery
+              {% elif attr_battery_level and attr_battery_level != 'unknown' and attr_battery_level != 'unavailable' and attr_battery_level != 'none' %}
+                battery_level
+              {% elif attr_battery_percent and attr_battery_percent != 'unknown' and attr_battery_percent != 'unavailable' and attr_battery_percent != 'none' %}
+                battery_percent
+              {% elif attr_percentage and attr_percentage != 'unknown' and attr_percentage != 'unavailable' and attr_percentage != 'none' %}
+                percentage
+              {% else %}
+                none
+              {% endif %}
+            raw_attr: >-
+              {% if attr_battery and attr_battery != 'unknown' and attr_battery != 'unavailable' and attr_battery != 'none' %}
+                battery={{ attr_battery }}
+              {% elif attr_battery_level and attr_battery_level != 'unknown' and attr_battery_level != 'unavailable' and attr_battery_level != 'none' %}
+                battery_level={{ attr_battery_level }}
+              {% elif attr_battery_percent and attr_battery_percent != 'unknown' and attr_battery_percent != 'unavailable' and attr_battery_percent != 'none' %}
+                battery_percent={{ attr_battery_percent }}
+              {% elif attr_percentage and attr_percentage != 'unknown' and attr_percentage != 'unavailable' and attr_percentage != 'none' %}
+                percentage={{ attr_percentage }}
+              {% else %}
+                none
+              {% endif %}
             lvl: >-
               {% set attr_val = none %}
-              {% if attr_battery is number %}
-                {% set attr_val = attr_battery %}
-              {% elif attr_battery_level is number %}
-                {% set attr_val = attr_battery_level %}
-              {% elif attr_battery_percent is number %}
-                {% set attr_val = attr_battery_percent %}
-              {% elif attr_percentage is number %}
-                {% set attr_val = attr_percentage %}
-              {% else %}
-                {% set attr_str = none %}
-                {% if attr_battery and attr_battery != 'unknown' and attr_battery != 'unavailable' %}
-                  {% set attr_str = attr_battery | string | trim %}
-                {% elif attr_battery_level and attr_battery_level != 'unknown' and attr_battery_level != 'unavailable' %}
-                  {% set attr_str = attr_battery_level | string | trim %}
-                {% elif attr_battery_percent and attr_battery_percent != 'unknown' and attr_battery_percent != 'unavailable' %}
-                  {% set attr_str = attr_battery_percent | string | trim %}
-                {% elif attr_percentage and attr_percentage != 'unknown' and attr_percentage != 'unavailable' %}
-                  {% set attr_str = attr_percentage | string | trim %}
+              {% if attr_battery and attr_battery != 'unknown' and attr_battery != 'unavailable' and attr_battery != 'none' %}
+                {% if attr_battery is number %}
+                  {% set attr_val = attr_battery %}
+                {% else %}
+                  {% set attr_str = (attr_battery | string | trim | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
+                  {% if attr_str %}
+                    {% set attr_float = attr_str | float(default=-1) %}
+                    {% if attr_float != -1 and attr_float >= 0 and attr_float <= 100 %}
+                      {% set attr_val = attr_float %}
+                    {% endif %}
+                  {% endif %}
                 {% endif %}
-                {% if attr_str %}
-                  {% set attr_clean = attr_str | regex_replace('[^0-9.]', '') | trim %}
-                  {% if attr_clean and attr_clean != '' and attr_clean != '.' %}
-                    {% set attr_float = attr_clean | float %}
-                    {% if attr_float is number and attr_float >= 0 and attr_float <= 100 %}
+              {% elif attr_battery_level and attr_battery_level != 'unknown' and attr_battery_level != 'unavailable' and attr_battery_level != 'none' %}
+                {% if attr_battery_level is number %}
+                  {% set attr_val = attr_battery_level %}
+                {% else %}
+                  {% set attr_str = (attr_battery_level | string | trim | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
+                  {% if attr_str %}
+                    {% set attr_float = attr_str | float(default=-1) %}
+                    {% if attr_float != -1 and attr_float >= 0 and attr_float <= 100 %}
+                      {% set attr_val = attr_float %}
+                    {% endif %}
+                  {% endif %}
+                {% endif %}
+              {% elif attr_battery_percent and attr_battery_percent != 'unknown' and attr_battery_percent != 'unavailable' and attr_battery_percent != 'none' %}
+                {% if attr_battery_percent is number %}
+                  {% set attr_val = attr_battery_percent %}
+                {% else %}
+                  {% set attr_str = (attr_battery_percent | string | trim | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
+                  {% if attr_str %}
+                    {% set attr_float = attr_str | float(default=-1) %}
+                    {% if attr_float != -1 and attr_float >= 0 and attr_float <= 100 %}
+                      {% set attr_val = attr_float %}
+                    {% endif %}
+                  {% endif %}
+                {% endif %}
+              {% elif attr_percentage and attr_percentage != 'unknown' and attr_percentage != 'unavailable' and attr_percentage != 'none' %}
+                {% if attr_percentage is number %}
+                  {% set attr_val = attr_percentage %}
+                {% else %}
+                  {% set attr_str = (attr_percentage | string | trim | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
+                  {% if attr_str %}
+                    {% set attr_float = attr_str | float(default=-1) %}
+                    {% if attr_float != -1 and attr_float >= 0 and attr_float <= 100 %}
                       {% set attr_val = attr_float %}
                     {% endif %}
                   {% endif %}
@@ -144,7 +189,7 @@ action:
                 {{ attr_val }}
               {% else %}
                 {% set v = states(repeat.item) %}
-                {% set v_str = (v | string | trim | lower) | replace(',', '.') %}
+                {% set v_str = (v | string | trim | lower) %}
                 {% if v_str in ['unknown', 'unavailable', 'none', ''] %}
                   -1
                 {% elif v is number %}
@@ -154,10 +199,10 @@ action:
                     -1
                   {% endif %}
                 {% else %}
-                  {% set v_clean = v_str | regex_replace('[^0-9.]', '') | trim %}
-                  {% if v_clean and v_clean != '' and v_clean != '.' %}
-                    {% set v_float = v_clean | float %}
-                    {% if v_float is number and v_float >= 0 and v_float <= 100 %}
+                  {% set v_normalized = (v_str | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
+                  {% if v_normalized %}
+                    {% set v_float = v_normalized | float(default=-1) %}
+                    {% if v_float != -1 and v_float >= 0 and v_float <= 100 %}
                       {{ v_float }}
                     {% else %}
                       -1
@@ -166,19 +211,6 @@ action:
                     -1
                   {% endif %}
                 {% endif %}
-              {% endif %}
-            raw_state: "{{ states(repeat.item) }}"
-            raw_attr: >-
-              {% if attr_battery and attr_battery != 'unknown' and attr_battery != 'unavailable' %}
-                battery={{ attr_battery }}
-              {% elif attr_battery_level and attr_battery_level != 'unknown' and attr_battery_level != 'unavailable' %}
-                battery_level={{ attr_battery_level }}
-              {% elif attr_battery_percent and attr_battery_percent != 'unknown' and attr_battery_percent != 'unavailable' %}
-                battery_percent={{ attr_battery_percent }}
-              {% elif attr_percentage and attr_percentage != 'unknown' and attr_percentage != 'unavailable' %}
-                percentage={{ attr_percentage }}
-              {% else %}
-                none
               {% endif %}
             display_name: >-
               {% set d_id = device_id(repeat.item) %}
@@ -200,14 +232,15 @@ action:
             - condition: template
               value_template: "{{ lvl == -1 }}"
           then:
-            - service: logbook.log
+            - service: persistent_notification.create
               data:
-                name: "Battery Debug"
+                notification_id: "battery_debug_{{ ent | replace('.', '_') | replace('-', '_') }}"
+                title: "Battery Debug - {{ ent }}"
                 message: >-
-                  ent={{ ent }}, 
-                  raw_state={{ raw_state }}, 
-                  raw_attr={{ raw_attr }}, 
-                  lvl={{ lvl }}
+                  ent: {{ ent }}
+                  raw_state: {{ raw_state }}
+                  raw_attr: {{ raw_attr }}
+                  lvl: {{ lvl }}
 
         - if:
             - condition: template
@@ -224,7 +257,7 @@ action:
             mem_ent: "{{ repeat.item }}"
             mem_lvl: >-
               {% set v = states(repeat.item) %}
-              {% set v_str = (v | string | trim) | lower %}
+              {% set v_str = (v | string | trim | lower) %}
               {% if v_str in ['unknown', 'unavailable', 'none', ''] %}
                 -1
               {% elif v is number %}
@@ -234,10 +267,10 @@ action:
                   -1
                 {% endif %}
               {% else %}
-                {% set v_clean = v_str | regex_replace('[^0-9.]', '') | trim %}
-                {% if v_clean and v_clean != '' and v_clean != '.' %}
-                  {% set v_float = v_clean | float %}
-                  {% if v_float is number and v_float >= 0 and v_float <= 100 %}
+                {% set v_normalized = (v_str | replace(',', '.') | replace('%', '') | replace(' ', '')) %}
+                {% if v_normalized %}
+                  {% set v_float = v_normalized | float(default=-1) %}
+                  {% if v_float != -1 and v_float >= 0 and v_float <= 100 %}
                     {{ v_float }}
                   {% else %}
                     -1
