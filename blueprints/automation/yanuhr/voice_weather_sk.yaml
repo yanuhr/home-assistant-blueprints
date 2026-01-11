@@ -79,25 +79,41 @@ action:
         {% set h = val.time[11:13] | int %}
         {% set m = val.time[14:16] | int %}
         {% set t = val['data']['instant']['details']['air_temperature'] %}
-        {{ {'temp': t, 'time': 'o ' ~ hour_ordinal[h] ~ (' a ' ~ minute_ordinal[m] if m > 0 else ' hodine')} }}
+        {% set h_word = hour_ordinal.get(h, h | string) %}
+        {% set m_word = minute_ordinal.get(m, m | string) if m > 0 else '' %}
+        {{ {'temp': t, 'time': 'o ' ~ h_word ~ (' a ' ~ m_word if m > 0 else ' hodine')} }}
 
       max_temp_data: >-
         {% set val = forecast[:24] | sort(attribute='data.instant.details.air_temperature', reverse=true) | first %}
         {% set h = val.time[11:13] | int %}
         {% set m = val.time[14:16] | int %}
         {% set t = val['data']['instant']['details']['air_temperature'] %}
-        {{ {'temp': t, 'time': 'o ' ~ hour_ordinal[h] ~ (' a ' ~ minute_ordinal[m] if m > 0 else ' hodine')} }}
+        {% set h_word = hour_ordinal.get(h, h | string) %}
+        {% set m_word = minute_ordinal.get(m, m | string) if m > 0 else '' %}
+        {{ {'temp': t, 'time': 'o ' ~ h_word ~ (' a ' ~ m_word if m > 0 else ' hodine')} }}
 
       precip_text: >-
         {% set rains = forecast[:24] | selectattr('data.next_1_hours.details.precipitation_amount','gt',0) | list %}
         {% if rains | length > 0 %}
           {% set f = rains[0] %}
           {% set total = forecast[:24] | map(attribute='data.next_1_hours.details.precipitation_amount') | select('defined') | map('float') | list | sum %}
-          {% set intp = total | int %}
-          {% set decp = ((total - intp) * 10) | round | int %}
-          {% set total_words = number_to_words[intp] ~ ' celých ' ~ number_to_words[decp] %}
+          {% set v = total | float %}
+          {% set is_neg = v < 0 %}
+          {% set abs_v = v | abs %}
+          {% set intp = abs_v | int %}
+          {% set dec_raw = ((abs_v - intp) * 10) | round | int %}
+          {% if dec_raw >= 10 %}
+            {% set intp = intp + 1 %}
+            {% set decp = 0 %}
+          {% else %}
+            {% set decp = dec_raw %}
+          {% endif %}
+          {% set int_word = number_to_words.get(intp, intp | string) %}
+          {% set dec_word = number_to_words.get(decp, decp | string) %}
+          {% set prefix = 'mínus ' if is_neg else '' %}
+          {% set total_words = prefix ~ int_word ~ ' celých ' ~ dec_word %}
           {% set h = f.time[11:13] | int %}
-          Očakávané zrážky okolo {{ hour_ordinal[h] }} hodiny budú spolu asi {{ total_words }} milimetrov.
+          Očakávané zrážky okolo {{ hour_ordinal.get(h, h | string) }} hodiny budú spolu asi {{ total_words }} milimetrov.
         {% else %}
           Žiadne zrážky sa neočakávajú.
         {% endif %}
@@ -108,31 +124,85 @@ action:
         {{ processing if processing else entities | first }}
 
       message_text: >-
-        {%- set it = current_temp | int -%}
-        {%- set dt = ((current_temp - it)*10) | round | int -%}
-        {%- set msg = 'Aktuálna teplota je ' ~ number_to_words[it] %}
-        {%- if dt > 0 %}{% set msg = msg ~ ' celých ' ~ number_to_words[dt] %}{% endif %}
-        {%- set msg = msg ~ ' stupňov Celzia. ' %}
+        {%- set ct = current_temp | float -%}
+        {%- set ct_neg = ct < 0 -%}
+        {%- set ct_abs = ct | abs -%}
+        {%- set ct_int = ct_abs | int -%}
+        {%- set ct_dec_raw = ((ct_abs - ct_int) * 10) | round | int -%}
+        {%- if ct_dec_raw >= 10 -%}
+          {%- set ct_int = ct_int + 1 -%}
+          {%- set ct_dec = 0 -%}
+        {%- else -%}
+          {%- set ct_dec = ct_dec_raw -%}
+        {%- endif -%}
+        {%- set ct_int_word = number_to_words.get(ct_int, ct_int | string) -%}
+        {%- set ct_prefix = 'mínus ' if ct_neg else '' -%}
+        {%- set ct_text = ct_prefix ~ ct_int_word -%}
+        {%- if ct_dec > 0 -%}
+          {%- set ct_dec_word = number_to_words.get(ct_dec, ct_dec | string) -%}
+          {%- set ct_text = ct_text ~ ' celých ' ~ ct_dec_word -%}
+        {%- endif -%}
+        {%- set msg = 'Aktuálna teplota je ' ~ ct_text ~ ' stupňov Celzia. ' -%}
 
-        {%- set iw = wind_speed | int -%}
-        {%- set dw = ((wind_speed - iw)*10) | round | int -%}
-        {%- set msg = msg ~ 'Rýchlosť vetra je ' ~ number_to_words[iw] %}
-        {%- if dw > 0 %}{% set msg = msg ~ ' celých ' ~ number_to_words[dw] %}{% endif %}
-        {%- set msg = msg ~ ' kilometrov za hodinu. ' ~ strong_wind_warning %}
+        {%- set ws = wind_speed | float -%}
+        {%- set ws_neg = ws < 0 -%}
+        {%- set ws_abs = ws | abs -%}
+        {%- set ws_int = ws_abs | int -%}
+        {%- set ws_dec_raw = ((ws_abs - ws_int) * 10) | round | int -%}
+        {%- if ws_dec_raw >= 10 -%}
+          {%- set ws_int = ws_int + 1 -%}
+          {%- set ws_dec = 0 -%}
+        {%- else -%}
+          {%- set ws_dec = ws_dec_raw -%}
+        {%- endif -%}
+        {%- set ws_int_word = number_to_words.get(ws_int, ws_int | string) -%}
+        {%- set ws_prefix = 'mínus ' if ws_neg else '' -%}
+        {%- set ws_text = ws_prefix ~ ws_int_word -%}
+        {%- if ws_dec > 0 -%}
+          {%- set ws_dec_word = number_to_words.get(ws_dec, ws_dec | string) -%}
+          {%- set ws_text = ws_text ~ ' celých ' ~ ws_dec_word -%}
+        {%- endif -%}
+        {%- set msg = msg ~ 'Rýchlosť vetra je ' ~ ws_text ~ ' kilometrov za hodinu. ' ~ strong_wind_warning -%}
 
         {%- set mint = min_temp_data.temp | float -%}
-        {%- set mit = mint | int -%}
-        {%- set mdt = ((mint - mit)*10) | round | int -%}
-        {%- set msg = msg ~ 'Najnižšia teplota bude ' ~ number_to_words[mit] %}
-        {%- if mdt > 0 %}{% set msg = msg ~ ' celých ' ~ number_to_words[mdt] %}{% endif %}
-        {%- set msg = msg ~ ' stupňov ' ~ min_temp_data.time ~ '. ' %}
+        {%- set mint_neg = mint < 0 -%}
+        {%- set mint_abs = mint | abs -%}
+        {%- set mint_int = mint_abs | int -%}
+        {%- set mint_dec_raw = ((mint_abs - mint_int) * 10) | round | int -%}
+        {%- if mint_dec_raw >= 10 -%}
+          {%- set mint_int = mint_int + 1 -%}
+          {%- set mint_dec = 0 -%}
+        {%- else -%}
+          {%- set mint_dec = mint_dec_raw -%}
+        {%- endif -%}
+        {%- set mint_int_word = number_to_words.get(mint_int, mint_int | string) -%}
+        {%- set mint_prefix = 'mínus ' if mint_neg else '' -%}
+        {%- set mint_text = mint_prefix ~ mint_int_word -%}
+        {%- if mint_dec > 0 -%}
+          {%- set mint_dec_word = number_to_words.get(mint_dec, mint_dec | string) -%}
+          {%- set mint_text = mint_text ~ ' celých ' ~ mint_dec_word -%}
+        {%- endif -%}
+        {%- set msg = msg ~ 'Najnižšia teplota bude ' ~ mint_text ~ ' stupňov ' ~ min_temp_data.time ~ '. ' -%}
 
         {%- set maxt = max_temp_data.temp | float -%}
-        {%- set mat = maxt | int -%}
-        {%- set mdt2 = ((maxt - mat)*10) | round | int -%}
-        {%- set msg = msg ~ 'Najvyššia teplota bude ' ~ number_to_words[mat] %}
-        {%- if mdt2 > 0 %}{% set msg = msg ~ ' celých ' ~ number_to_words[mdt2] %}{% endif %}
-        {%- set msg = msg ~ ' stupňov ' ~ max_temp_data.time ~ '. ' ~ heavy_rain_warning %}
+        {%- set maxt_neg = maxt < 0 -%}
+        {%- set maxt_abs = maxt | abs -%}
+        {%- set maxt_int = maxt_abs | int -%}
+        {%- set maxt_dec_raw = ((maxt_abs - maxt_int) * 10) | round | int -%}
+        {%- if maxt_dec_raw >= 10 -%}
+          {%- set maxt_int = maxt_int + 1 -%}
+          {%- set maxt_dec = 0 -%}
+        {%- else -%}
+          {%- set maxt_dec = maxt_dec_raw -%}
+        {%- endif -%}
+        {%- set maxt_int_word = number_to_words.get(maxt_int, maxt_int | string) -%}
+        {%- set maxt_prefix = 'mínus ' if maxt_neg else '' -%}
+        {%- set maxt_text = maxt_prefix ~ maxt_int_word -%}
+        {%- if maxt_dec > 0 -%}
+          {%- set maxt_dec_word = number_to_words.get(maxt_dec, maxt_dec | string) -%}
+          {%- set maxt_text = maxt_text ~ ' celých ' ~ maxt_dec_word -%}
+        {%- endif -%}
+        {%- set msg = msg ~ 'Najvyššia teplota bude ' ~ maxt_text ~ ' stupňov ' ~ max_temp_data.time ~ '. ' ~ heavy_rain_warning -%}
 
         {{ msg ~ precip_text }}
 
