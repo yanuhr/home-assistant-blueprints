@@ -33,11 +33,24 @@ blueprint:
       name: Mapovanie miestností na rolety
       description: >
         Mapovanie hlasových názvov miestností na konkrétne rolety.
-        Príklad:
-        kuchyna: cover.kuchyna
-        kuchyňa: cover.kuchyna
-        kuchyni: cover.kuchyna
+        Kľúče môžu byť celé frázy v prirodzenom štýle (napr. "v kuchyni", "na terase", "pri okne").
+        Pri porovnávaní sa automaticky odstránia bežné predložky na začiatku (v/vo, na, do, z/zo, k/ku, s/so, u, pri, pred, za, pod, nad, od, medzi, oproti, okolo, cez… a pod.), takže nie je nutné riešiť presný tvar.
+        Alias môže byť aj vlastný názov (napr. "office janko"), ktorý sa priradí ku konkrétnej rolete (napr. cover.ikea_fyrtur_office_janko).
+        Príklady (alias: entita):
+        v kuchyni: cover.ikea_fyrtur_kuchyna
+        vo vstupnej hale: cover.xxx
+        v jankovej kancelárii: cover.ikea_fyrtur_office_janko
+        na terase: cover.xxx
+        pri okne: cover.xxx
+        oproti kúpeľni: cover.xxx
+        medzi izbami: cover.xxx
+        do obývačky: cover.xxx
+        z kuchyne: cover.xxx
+        office janko: cover.ikea_fyrtur_office_janko
+        jankova kancelaria: cover.ikea_fyrtur_office_janko
+        kuchyni: cover.ikea_fyrtur_kuchyna
         spalna: cover.spalna
+        Odporúčanie: používaj unikátne aliasy, aby sa neplietli podobné názvy miestností.
       default: {}
       selector:
         object: {}
@@ -137,17 +150,41 @@ action:
           -1
         {% endif %}
       pos_valid: "{{ (pos_value | int >= 0) and (pos_value | int <= 100) }}"
-      resolved_cover_raw: >-
+      room_norm: >-
         {% if room_slot %}
-          {% set room_normalized = room_slot | trim | lower %}
-          {% set ns = namespace(found_cover='', found_key='') %}
+          {% set preps = ['spomedzi ', 'spredo ', 'spred ', 'spodo ', 'spod ', 'predo ', 'pred ', 'podo ', 'pod ', 'nado ', 'nad ', 'cezo ', 'cez ', 'ponad ', 'popod ', 'popri ', 'vo ', 'zo ', 'ku ', 'so ', 'v ', 'z ', 'k ', 's ', 'na ', 'do ', 'od ', 'u ', 'pri ', 'za ', 'medzi ', 'oproti ', 'okolo ', 'po '] %}
+          {% set ns = namespace(value=room_slot | trim | lower, original=room_slot | trim | lower) %}
+          {% for _ in range(3) %}
+            {% for prep in preps %}
+              {% if ns.value.startswith(prep) %}
+                {% set ns.value = ns.value[prep|length:] | trim %}
+              {% endif %}
+            {% endfor %}
+          {% endfor %}
+          {{ ns.value if ns.value != '' else ns.original }}
+        {% else %}
+          ''
+        {% endif %}
+      resolved_data: >-
+        {% if room_slot %}
+          {% set ns = namespace(found_cover='', found_key_original='') %}
           {% if cover_voice_map is mapping %}
+            {% set preps = ['spomedzi ', 'spredo ', 'spred ', 'spodo ', 'spod ', 'predo ', 'pred ', 'podo ', 'pod ', 'nado ', 'nad ', 'cezo ', 'cez ', 'ponad ', 'popod ', 'popri ', 'vo ', 'zo ', 'ku ', 'so ', 'v ', 'z ', 'k ', 's ', 'na ', 'do ', 'od ', 'u ', 'pri ', 'za ', 'medzi ', 'oproti ', 'okolo ', 'po '] %}
             {% for key in cover_voice_map.keys() %}
               {% if not ns.found_cover %}
-                {% set key_normalized = key | trim | lower %}
-                {% if key_normalized == room_normalized %}
+                {% set key_temp = key | trim | lower %}
+                {% set key_ns = namespace(value=key_temp, original=key_temp) %}
+                {% for _ in range(3) %}
+                  {% for prep in preps %}
+                    {% if key_ns.value.startswith(prep) %}
+                      {% set key_ns.value = key_ns.value[prep|length:] | trim %}
+                    {% endif %}
+                  {% endfor %}
+                {% endfor %}
+                {% set key_norm = key_ns.value if key_ns.value != '' else key_ns.original %}
+                {% if key_norm == room_norm %}
                   {% set ns.found_cover = cover_voice_map[key] %}
-                  {% set ns.found_key = key %}
+                  {% set ns.found_key_original = key %}
                 {% endif %}
               {% endif %}
             {% endfor %}
@@ -158,8 +195,8 @@ action:
                 {% if not ns.found_cover %}
                   {% set area = area_name(cover_ent) %}
                   {% if area %}
-                    {% set area_normalized = area | trim | lower %}
-                    {% if room_normalized in area_normalized or area_normalized in room_normalized %}
+                    {% set area_norm = area | trim | lower %}
+                    {% if room_norm in area_norm or area_norm in room_norm %}
                       {% set ns.found_cover = cover_ent %}
                     {% endif %}
                   {% endif %}
@@ -167,28 +204,19 @@ action:
               {% endfor %}
             {% endif %}
           {% endif %}
-          {{ ns.found_cover }}
+          {% set cover_part = ns.found_cover | trim %}
+          {% set room_part = (ns.found_key_original if ns.found_key_original != '' else room_slot) | trim %}
+          {{ cover_part ~ '|||SEP|||' ~ room_part }}
         {% else %}
-          ''
+          {% set room_part = room_slot | trim %}
+          {{ '' ~ '|||SEP|||' ~ room_part }}
         {% endif %}
+      resolved_cover_raw: >-
+        {% set parts = resolved_data | split('|||SEP|||') %}
+        {{ (parts[0] | trim) if parts | length > 0 else '' }}
       resolved_room_name: >-
-        {% if room_slot %}
-          {% set room_normalized = room_slot | trim | lower %}
-          {% set ns = namespace(found_key='') %}
-          {% if cover_voice_map is mapping %}
-            {% for key in cover_voice_map.keys() %}
-              {% if not ns.found_key %}
-                {% set key_normalized = key | trim | lower %}
-                {% if key_normalized == room_normalized %}
-                  {% set ns.found_key = key %}
-                {% endif %}
-              {% endif %}
-            {% endfor %}
-          {% endif %}
-          {{ ns.found_key if ns.found_key != '' else room_slot }}
-        {% else %}
-          {{ room_slot }}
-        {% endif %}
+        {% set parts = resolved_data | split('|||SEP|||') %}
+        {{ (parts[1] | trim) if parts | length > 1 else (room_slot | trim) }}
       resolved_cover: "{{ resolved_cover_raw if resolved_cover_raw is match('^cover\\.') else '' }}"
       resolved_cover_valid: "{{ resolved_cover_raw != '' and resolved_cover_raw is match('^cover\\.') }}"
       resolved_cover_invalid: "{{ resolved_cover_raw != '' and not (resolved_cover_raw is match('^cover\\.')) }}"
