@@ -2,7 +2,7 @@ blueprint:
   name: Upozornenie na výmenu filtra v čističke vzduchu (simple / HA 2026.1)
   description: >
     Pošle notifikáciu, keď je aspoň jeden z vybraných binary_sensor filtrov v stave ON.
-    Voliteľne pošle hneď pri zmene off->on, a/alebo denne v zadanom čase.
+    Voliteľne pošle hneď pri zmene na ON, a/alebo denne v zadanom čase.
   domain: automation
 
   input:
@@ -59,12 +59,13 @@ trigger:
 
 variables:
   sensor_entities: !input filter_sensors
+  notify_services: !input notification_services
   immediate: !input immediate_notification
   use_persistent: !input use_persistent_fallback
   title: !input title
 
   notify_services_filtered: >-
-    {% set services = (!input notification_services) | default([]) %}
+    {% set services = notify_services | default([]) %}
     {{ services | map('string') | map('trim') | reject('equalto', '') | unique | list }}
 
   active_sensors: >-
@@ -116,5 +117,6 @@ action:
                     sequence:
                       - service: persistent_notification.create
                         data:
+                          notification_id: "filter_replace"
                           title: "{{ title }}"
                           message: "{{ message_text }}"
