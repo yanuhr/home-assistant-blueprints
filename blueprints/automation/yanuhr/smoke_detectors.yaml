@@ -47,26 +47,42 @@ blueprint:
     repeat_notifications:
       name: Opakované notifikácie
       description: >
-        Ak je aktivované, notifikácie sa budú opakovať každých 5 minút, pokiaľ
-        zostáva detekovaný dym.
+        Ak je aktivované, mobilné notifikácie sa budú opakovať každých 5 minút, pokiaľ
+        zostáva detekovaný dym. Satelity sa neopakujú.
       default: false
       selector:
         boolean: {}
 
-    tts_players:
-      name: TTS prehrávače (voliteľné)
+    assist_satellites:
+      name: Assist Satellites (voliteľné)
       description: >
-        Vyberte zariadenia s podporou TTS pre prehrávanie hlasových hlásení.
-        Podporované sú napríklad:
-        - Home Assistant Voice (media_player.assist_*)
-        - Google Nest/Home (media_player.google_*)
-        - Amazon Echo (media_player.echo_*)
-        Môžete vybrať viacero zariadení, na ktorých sa má hlásenie prehrať.
+        Vyberte Assist Satellite zariadenia pre hlasové hlásenia.
+        Môžete vybrať viacero satelitov.
       default: []
       selector:
         entity:
-          domain: media_player
+          domain: assist_satellite
           multiple: true
+
+    preannounce_enabled:
+      name: Povoliť chime pred hláškou
+      description: >
+        Ak je aktivované, pred hláškou sa prehrá chime (zvukový signál).
+      default: true
+      selector:
+        boolean: {}
+
+    satellite_playback_mode:
+      name: Režim prehrávania satelitov
+      description: >
+        Sequential: Satelity prehrávajú jeden po druhom (najstabilnejšie).
+        Parallel: Všetky satelity prehrávajú naraz (rýchlejšie, ale môže spôsobiť problémy).
+      default: sequential
+      selector:
+        select:
+          options:
+            - sequential
+            - parallel
 
     use_room_names:
       name: Použiť názvy miestností
@@ -77,36 +93,94 @@ blueprint:
       selector:
         boolean: {}
 
+    max_satellite_announcements:
+      name: Maximálny počet satelitných hlásení
+      description: >
+        Maximálny počet satelitných hlásení na jeden incident (prvý + voliteľne druhý).
+        Nastavte 0 pre vypnutie satelitných hlásení.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 1
+
+    second_announce_delay_minutes:
+      name: Oneskorenie druhého satelitného hlásenia (minúty)
+      description: >
+        Po koľkých minútach sa prehrá druhé satelitné hlásenie, ak dym stále trvá.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+
+    daily_report_time:
+      name: Čas denného reportu
+      description: >
+        Čas, kedy sa pošle denný report o nedostupných senzoroch.
+      default: "08:00:00"
+      selector:
+        time: {}
+
+    all_unavailable_grace_minutes:
+      name: Grace period pre všetky nedostupné senzory (minúty)
+      description: >
+        Ak sú všetky senzory nedostupné, pošle sa notifikácia len ak tento stav trvá aspoň totoľko minút.
+        Chráni pred spamom pri HA reštarte alebo update Windows.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+
 trigger:
   - platform: state
     entity_id: !input smoke_sensors
     from: "off"
     to: "on"
+    id: smoke_on
 
   - platform: state
     entity_id: !input smoke_sensors
     from: "on"
     to: "off"
+    id: smoke_off
 
-  - platform: state
-    entity_id: !input smoke_sensors
-    to: ["unavailable", "unknown"]
-
-  - platform: time_pattern
-    minutes: /5
-    id: repeat_notification
-
-condition:
-  - condition: template
-    value_template: >-
-      {% if trigger.id == 'repeat_notification' %}
-        {{ repeat_notifications and smoke_sensors | select('is_state', 'on') | list | length > 0 }}
-      {% else %}
-        true
-      {% endif %}
+  - platform: time
+    at: !input daily_report_time
+    id: daily_report
 
 action:
   - variables:
+      smoke_sensors: !input smoke_sensors
+      notification_services: !input notification_services
+      alarm_mode: !input alarm_mode
+      custom_alert_actions: !input custom_alert_actions
+      repeat_notifications: !input repeat_notifications
+      assist_satellites: !input assist_satellites
+      preannounce_enabled: !input preannounce_enabled
+      satellite_playback_mode: !input satellite_playback_mode
+      use_room_names: !input use_room_names
+      max_satellite_announcements: !input max_satellite_announcements
+      second_announce_delay_minutes: !input second_announce_delay_minutes
+      all_unavailable_grace_minutes: !input all_unavailable_grace_minutes
+      active_smoke_entities: "{{ smoke_sensors | select('is_state', 'on') | list }}"
+      active_smoke_count: "{{ active_smoke_entities | length }}"
+      active_smoke_list: >-
+        {% set ns = namespace(names=[]) %}
+        {% for sensor in active_smoke_entities %}
+          {% if use_room_names %}
+            {% set area = area_name(sensor) %}
+            {% set name = area if area else state_attr(sensor, 'friendly_name') | default(sensor) %}
+          {% else %}
+            {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
+          {% endif %}
+          {% set ns.names = ns.names + [name] %}
+        {% endfor %}
+        {{ ns.names | join(', ') }}
       sensor_name: >-
         {% if trigger is defined and trigger.entity_id is defined %}
           {{ state_attr(trigger.entity_id, 'friendly_name') | default(trigger.entity_id) }}
@@ -120,70 +194,210 @@ action:
         {% else %}
           {{ sensor_name }}
         {% endif %}
-      new_state: "{{ trigger.to_state.state }}"
-      notification_services: !input notification_services
-      alarm_mode: !input alarm_mode
-      custom_alert_actions: !input custom_alert_actions
-      repeat_notifications: !input repeat_notifications
-      tts_players: !input tts_players
-      use_room_names: !input use_room_names
-      has_notifications: "{{ notification_services | length > 0 }}"
-      has_alarm_action: "{{ custom_alert_actions | length > 0 }}"
-      has_tts: "{{ tts_players | length > 0 }}"
 
   - choose:
       - alias: Zadymenie
         conditions:
-          - condition: template
-            value_template: "{{ new_state == 'on' }}"
+          - condition: trigger
+            id: smoke_on
         sequence:
+          - variables:
+              other_active_count: >-
+                {% if trigger.entity_id is defined %}
+                  {{ (smoke_sensors | reject('equalto', trigger.entity_id) | select('is_state', 'on') | list | length) }}
+                {% else %}
+                  0
+                {% endif %}
+              announcement_message: >-
+                {% if active_smoke_count | int > 1 %}
+                  Pozor, bol detegovaný dym v: {{ active_smoke_list }}
+                {% else %}
+                  Pozor, bol detegovaný dym v {{ room_name }}
+                {% endif %}
+              notification_message: >-
+                {% if active_smoke_count | int > 1 %}
+                  Detektory v {{ active_smoke_list }} zaznamenali dym!
+                {% else %}
+                  Detektor {{ room_name }} zaznamenal dym!
+                {% endif %}
           - if:
               - condition: template
-                value_template: "{{ has_notifications }}"
+                value_template: "{{ other_active_count | int > 0 }}"
             then:
-              - repeat:
-                  for_each: "{{ notification_services }}"
-                  sequence:
-                    - service: "{{ repeat.item }}"
-                      data:
-                        title: "🚨 Detekovaný dym"
-                        message: "Detektor {{ room_name }} zaznamenal dym!"
-                        data:
-                          priority: high
-                          importance: max
-                          channel: emergency
+              - stop: "Incident už beží, tento beh sa ukončuje"
+          - parallel:
+              - if:
+                  - condition: template
+                    value_template: "{{ notification_services | length > 0 }}"
+                then:
+                  - repeat:
+                      for_each: "{{ notification_services }}"
+                      sequence:
+                        - service: "{{ repeat.item }}"
+                          data:
+                            title: "🚨 Detekovaný dym"
+                            message: "{{ notification_message }}"
+                            data:
+                              priority: high
+                              importance: max
+                              channel: emergency
+              - if:
+                  - condition: template
+                    value_template: "{{ alarm_mode and (custom_alert_actions | length > 0) }}"
+                then:
+                  - repeat:
+                      for_each: "{{ custom_alert_actions }}"
+                      sequence:
+                        - service: homeassistant.turn_on
+                          target:
+                            entity_id: "{{ repeat.item }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ (assist_satellites | length > 0) and (max_satellite_announcements | int >= 1) }}"
+                then:
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ satellite_playback_mode == 'parallel' }}"
+                        sequence:
+                          - service: assist_satellite.announce
+                            target:
+                              entity_id: "{{ assist_satellites }}"
+                            data:
+                              message: "{{ announcement_message }}"
+                              preannounce: "{{ preannounce_enabled }}"
+                            continue_on_error: true
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ satellite_playback_mode == 'sequential' }}"
+                        sequence:
+                          - repeat:
+                              for_each: "{{ assist_satellites }}"
+                              sequence:
+                                - service: assist_satellite.announce
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    message: "{{ announcement_message }}"
+                                    preannounce: "{{ preannounce_enabled }}"
+                                  continue_on_error: true
           - if:
               - condition: template
-                value_template: "{{ alarm_mode and has_alarm_action }}"
+                value_template: "{{ (assist_satellites | length > 0) and (max_satellite_announcements | int >= 2) }}"
             then:
-              - repeat:
-                  for_each: "{{ custom_alert_actions }}"
-                  sequence:
-                    - service: homeassistant.turn_on
-                      target:
-                        entity_id: "{{ repeat.item }}"
+              - delay:
+                  minutes: "{{ second_announce_delay_minutes | int }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ smoke_sensors | select('is_state', 'on') | list | length > 0 }}"
+                then:
+                  - variables:
+                      delayed_announcement_message: >-
+                        {% set active = smoke_sensors | select('is_state', 'on') | list %}
+                        {% set ns = namespace(names=[]) %}
+                        {% for sensor in active %}
+                          {% if use_room_names %}
+                            {% set area = area_name(sensor) %}
+                            {% set name = area if area else state_attr(sensor, 'friendly_name') | default(sensor) %}
+                          {% else %}
+                            {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
+                          {% endif %}
+                          {% set ns.names = ns.names + [name] %}
+                        {% endfor %}
+                        {% if ns.names | length > 1 %}
+                          Stále detegovaný dym v: {{ ns.names | join(', ') }}
+                        {% else %}
+                          Stále detegovaný dym v {{ ns.names[0] if ns.names | length > 0 else room_name }}
+                        {% endif %}
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ satellite_playback_mode == 'parallel' }}"
+                        sequence:
+                          - service: assist_satellite.announce
+                            target:
+                              entity_id: "{{ assist_satellites }}"
+                            data:
+                              message: "{{ delayed_announcement_message }}"
+                              preannounce: "{{ preannounce_enabled }}"
+                            continue_on_error: true
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ satellite_playback_mode == 'sequential' }}"
+                        sequence:
+                          - repeat:
+                              for_each: "{{ assist_satellites }}"
+                              sequence:
+                                - service: assist_satellite.announce
+                                  target:
+                                    entity_id: "{{ repeat.item }}"
+                                  data:
+                                    message: "{{ delayed_announcement_message }}"
+                                    preannounce: "{{ preannounce_enabled }}"
+                                  continue_on_error: true
           - if:
               - condition: template
-                value_template: "{{ has_tts }}"
+                value_template: "{{ repeat_notifications }}"
             then:
               - repeat:
-                  for_each: "{{ tts_players }}"
+                  while:
+                    - condition: template
+                      value_template: "{{ smoke_sensors | select('is_state', 'on') | list | length > 0 }}"
                   sequence:
-                    - service: tts.speak
-                      data:
-                        cache: true
-                        media_player_entity_id: "{{ repeat.item }}"
-                        message: "Pozor, bol detegovaný dym v {{ room_name }}"
-                        language: sk
+                    - delay:
+                        minutes: 5
+                    - if:
+                        - condition: template
+                          value_template: "{{ smoke_sensors | select('is_state', 'on') | list | length == 0 }}"
+                      then:
+                        - stop: "Dym už netrvá – neodosielam ďalšiu repeat notifikáciu"
+                    - variables:
+                        active_smoke_entities: "{{ smoke_sensors | select('is_state', 'on') | list }}"
+                        active_smoke_count: "{{ active_smoke_entities | length }}"
+                        active_smoke_list: >-
+                          {% set ns = namespace(names=[]) %}
+                          {% for sensor in active_smoke_entities %}
+                            {% if use_room_names %}
+                              {% set area = area_name(sensor) %}
+                              {% set name = area if area else state_attr(sensor, 'friendly_name') | default(sensor) %}
+                            {% else %}
+                              {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
+                            {% endif %}
+                            {% set ns.names = ns.names + [name] %}
+                          {% endfor %}
+                          {{ ns.names | join(', ') }}
+                        notification_message: >-
+                          {% if active_smoke_count | int > 1 %}
+                            Stále detegovaný dym v: {{ active_smoke_list }}
+                          {% else %}
+                            Stále detegovaný dym v {{ active_smoke_list if active_smoke_list else room_name }}
+                          {% endif %}
+                    - if:
+                        - condition: template
+                          value_template: "{{ notification_services | length > 0 }}"
+                      then:
+                        - repeat:
+                            for_each: "{{ notification_services }}"
+                            sequence:
+                              - service: "{{ repeat.item }}"
+                                data:
+                                  title: "🚨 Stále detegovaný dym"
+                                  message: "{{ notification_message }}"
+                                  data:
+                                    priority: high
+                                    importance: max
+                                    channel: emergency
 
       - alias: Koniec zadymenia
         conditions:
+          - condition: trigger
+            id: smoke_off
           - condition: template
-            value_template: "{{ new_state == 'off' }}"
+            value_template: "{{ smoke_sensors | select('is_state', 'on') | list | length == 0 }}"
         sequence:
           - if:
               - condition: template
-                value_template: "{{ has_notifications }}"
+                value_template: "{{ notification_services | length > 0 }}"
             then:
               - repeat:
                   for_each: "{{ notification_services }}"
@@ -191,30 +405,99 @@ action:
                     - service: "{{ repeat.item }}"
                       data:
                         title: "ℹ️ Dym zmizol"
-                        message: "Detektor {{ room_name }} už nezaznamenáva dym."
+                        message: "Všetky detektory už nezaznamenávajú dym."
                         data:
                           priority: default
                           importance: high
 
-      - alias: Senzor nie je dostupný
+      - alias: Denný report o nedostupných senzoroch
         conditions:
-          - condition: template
-            value_template: "{{ new_state in ['unavailable', 'unknown'] }}"
+          - condition: trigger
+            id: daily_report
         sequence:
+          - variables:
+              total: "{{ smoke_sensors | length }}"
+              unavail_count: >-
+                {% set ns = namespace(count=0, lines=[]) %}
+                {% for sensor in smoke_sensors %}
+                  {% set state = states(sensor) %}
+                  {% if state in ['unavailable', 'unknown'] %}
+                    {% set ns.count = ns.count + 1 %}
+                    {% if use_room_names %}
+                      {% set area = area_name(sensor) %}
+                      {% set name = area if area else state_attr(sensor, 'friendly_name') | default(sensor) %}
+                    {% else %}
+                      {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
+                    {% endif %}
+                    {% set ns.lines = ns.lines + [name] %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.count }}
+              report_lines: >-
+                {% set ns = namespace(count=0, lines=[]) %}
+                {% for sensor in smoke_sensors %}
+                  {% set state = states(sensor) %}
+                  {% if state in ['unavailable', 'unknown'] %}
+                    {% set ns.count = ns.count + 1 %}
+                    {% if use_room_names %}
+                      {% set area = area_name(sensor) %}
+                      {% set name = area if area else state_attr(sensor, 'friendly_name') | default(sensor) %}
+                    {% else %}
+                      {% set name = state_attr(sensor, 'friendly_name') | default(sensor) %}
+                    {% endif %}
+                    {% set ns.lines = ns.lines + [name] %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.lines | join(', ') }}
           - if:
               - condition: template
-                value_template: "{{ has_notifications }}"
+                value_template: "{{ (unavail_count | int > 0) and (unavail_count | int < total | int) and (notification_services | length > 0) }}"
             then:
               - repeat:
                   for_each: "{{ notification_services }}"
                   sequence:
                     - service: "{{ repeat.item }}"
                       data:
-                        title: "⚠️ Senzor nie je dostupný"
-                        message: "Detektor {{ room_name }} nie je dostupný a môže byť nefunkčný!"
+                        title: "⚠️ Denný report: Nedostupné senzory dymu"
+                        message: "{{ report_lines }}"
+                        data:
+                          priority: default
+                          importance: high
+                          channel: warning
+          - if:
+              - condition: template
+                value_template: >-
+                  {% set ns = namespace(grace_ok=true) %}
+                  {% if (total | int > 0) and (unavail_count | int == total | int) %}
+                    {% for sensor in smoke_sensors %}
+                      {% set state = states(sensor) %}
+                      {% if state in ['unavailable', 'unknown'] %}
+                        {% set last_changed = states[sensor].last_changed %}
+                        {% if last_changed %}
+                          {% set duration_minutes = ((now() - last_changed).total_seconds() / 60) | int %}
+                          {% if duration_minutes < all_unavailable_grace_minutes | int %}
+                            {% set ns.grace_ok = false %}
+                          {% endif %}
+                        {% else %}
+                          {% set ns.grace_ok = false %}
+                        {% endif %}
+                      {% endif %}
+                    {% endfor %}
+                    {{ ns.grace_ok and (notification_services | length > 0) }}
+                  {% else %}
+                    false
+                  {% endif %}
+            then:
+              - repeat:
+                  for_each: "{{ notification_services }}"
+                  sequence:
+                    - service: "{{ repeat.item }}"
+                      data:
+                        title: "⚠️ Všetky dymové senzory nedostupné"
+                        message: "Vyzerá to na výpadok siete/koordinátora. Skontroluj HA/koordinátor."
                         data:
                           priority: high
                           importance: high
                           channel: warning
 
-mode: single
+mode: parallel
