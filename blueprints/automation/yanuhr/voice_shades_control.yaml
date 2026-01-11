@@ -1,7 +1,8 @@
 blueprint:
   name: Hlasové ovládanie roliet (SK)
   description: >
-    Ovládanie všetkých roliet hlasom cez príkazy ako „zatvor všetky rolety“ alebo „otvor všetky rolety“.
+    Ovládanie roliet hlasom cez príkazy ako „zatvor všetky rolety", „otvor všetky rolety"
+    alebo „nastav roletu v [miestnosť] na [percentá]".
     Automaticky zistí aktívny Assist Satellite a prehrá TTS odpoveď len na ňom.
   domain: automation
 
@@ -28,6 +29,19 @@ blueprint:
           domain: assist_satellite
           multiple: true
 
+    cover_voice_map:
+      name: Mapovanie miestností na rolety
+      description: >
+        Mapovanie hlasových názvov miestností na konkrétne rolety.
+        Príklad:
+        kuchyna: cover.kuchyna
+        kuchyňa: cover.kuchyna
+        kuchyni: cover.kuchyna
+        spalna: cover.spalna
+      default: {}
+      selector:
+        object: {}
+
 trigger:
   - platform: conversation
     command:
@@ -35,13 +49,20 @@ trigger:
       - "zatvor všetky rolety"
       - "otvor vsetky rolety"
       - "zatvor vsetky rolety"
+      - "nastav roletu v {room} na {pos} percent"
+      - "nastav roletu v {room} na {pos} %"
+      - "nastav roletu {room} na {pos} percent"
+      - "nastav roletu {room} na {pos} %"
+      - "nastav roletu v {room} na {pos}"
+      - "nastav roletu {room} na {pos}"
 
 variables:
   covers_map: !input covers_map
   assist_satellites: !input assist_satellites
-  command_text: "{{ trigger.text | lower }}"
-  action: >-
-    {% if 'zatvor' in command_text %}zatvor{% elif 'otvor' in command_text %}otvor{% else %}''{% endif %}
+  cover_voice_map: !input cover_voice_map
+  command_text: "{{ trigger.sentence | default(trigger.text | default('')) | lower }}"
+  room_slot: "{{ trigger.slots.room | default('') | string | trim | lower }}"
+  pos_slot: "{{ trigger.slots.pos | default('') | string | trim }}"
   matched_entity: >-
     {% set trigger_satellite = none %}
     {% set dev_id = none %}
@@ -78,54 +99,154 @@ variables:
 
 action:
   - variables:
-      covers_count: >-
+      covers_list: >-
         {% if covers_map is mapping %}
           {% if 'všetky' in covers_map and covers_map['všetky'] is list %}
-            {{ covers_map['všetky'] | length }}
+            {{ covers_map['všetky'] }}
           {% elif 'vsetky' in covers_map and covers_map['vsetky'] is list %}
-            {{ covers_map['vsetky'] | length }}
+            {{ covers_map['vsetky'] }}
           {% else %}
-            0
+            []
           {% endif %}
         {% else %}
-          0
+          []
         {% endif %}
-      covers_csv: >-
-        {% if covers_map is mapping %}
-          {% if 'všetky' in covers_map and covers_map['všetky'] is list %}
-            {{ covers_map['všetky'] | join(',') }}
-          {% elif 'vsetky' in covers_map and covers_map['vsetky'] is list %}
-            {{ covers_map['vsetky'] | join(',') }}
+      covers_list_filtered: "{{ covers_list | select('match', '^cover\\.') | list }}"
+      covers_count: "{{ covers_list_filtered | length }}"
+      covers_csv: "{{ covers_list_filtered | join(', ') }}"
+      has_slots: "{{ (trigger.slots is defined and trigger.slots.room is defined and trigger.slots.pos is defined) and (room_slot != '') and (pos_slot != '') }}"
+      action_type: >-
+        {% if has_slots %}
+          set_position
+        {% elif 'otvor' in command_text %}
+          open_all
+        {% elif 'zatvor' in command_text %}
+          close_all
+        {% else %}
+          unknown
+        {% endif %}
+      pos_value: >-
+        {% if pos_slot %}
+          {% set pos_clean = pos_slot | replace(' %', '') | replace('%', '') | replace(' percent', '') | replace('percent', '') | trim %}
+          {% if pos_clean is match('^\\d+$') %}
+            {{ pos_clean | int }}
           {% else %}
-            {{ '' }}
+            -1
           {% endif %}
         {% else %}
-          {{ '' }}
+          -1
         {% endif %}
+      pos_valid: "{{ (pos_value | int >= 0) and (pos_value | int <= 100) }}"
+      resolved_cover_raw: >-
+        {% if room_slot %}
+          {% set room_normalized = room_slot | trim | lower %}
+          {% set ns = namespace(found_cover='', found_key='') %}
+          {% if cover_voice_map is mapping %}
+            {% for key in cover_voice_map.keys() %}
+              {% if not ns.found_cover %}
+                {% set key_normalized = key | trim | lower %}
+                {% if key_normalized == room_normalized %}
+                  {% set ns.found_cover = cover_voice_map[key] %}
+                  {% set ns.found_key = key %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+          {% if not ns.found_cover %}
+            {% if covers_list_filtered | length > 0 %}
+              {% for cover_ent in covers_list_filtered %}
+                {% if not ns.found_cover %}
+                  {% set area = area_name(cover_ent) %}
+                  {% if area %}
+                    {% set area_normalized = area | trim | lower %}
+                    {% if room_normalized in area_normalized or area_normalized in room_normalized %}
+                      {% set ns.found_cover = cover_ent %}
+                    {% endif %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          {% endif %}
+          {{ ns.found_cover }}
+        {% else %}
+          ''
+        {% endif %}
+      resolved_room_name: >-
+        {% if room_slot %}
+          {% set room_normalized = room_slot | trim | lower %}
+          {% set ns = namespace(found_key='') %}
+          {% if cover_voice_map is mapping %}
+            {% for key in cover_voice_map.keys() %}
+              {% if not ns.found_key %}
+                {% set key_normalized = key | trim | lower %}
+                {% if key_normalized == room_normalized %}
+                  {% set ns.found_key = key %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+          {{ ns.found_key if ns.found_key != '' else room_slot }}
+        {% else %}
+          {{ room_slot }}
+        {% endif %}
+      resolved_cover: "{{ resolved_cover_raw if resolved_cover_raw is match('^cover\\.') else '' }}"
+      resolved_cover_valid: "{{ resolved_cover_raw != '' and resolved_cover_raw is match('^cover\\.') }}"
+      resolved_cover_invalid: "{{ resolved_cover_raw != '' and not (resolved_cover_raw is match('^cover\\.')) }}"
       tts_sentence: >-
-        {% if covers_count | int > 0 and action in ['otvor', 'zatvor'] %}
-          Všetky rolety boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
-        {% elif action not in ['otvor', 'zatvor'] %}
-          Neznámy príkaz. Použite "otvor všetky rolety" alebo "zatvor všetky rolety".
+        {% if action_type == 'set_position' %}
+          {% if not pos_valid %}
+            {% if pos_value | int < 0 %}
+              Nerozumiem percentám. Zadaj hodnotu 0 až 100 percent.
+            {% else %}
+              Zadaj hodnotu 0 až 100 percent.
+            {% endif %}
+          {% elif resolved_cover_invalid %}
+            Mapovanie miestností obsahuje neplatnú entitu. Skontroluj cover_voice_map.
+          {% elif not resolved_cover %}
+            Neviem, ktorú roletu myslíš. Skontroluj mapovanie miestností.
+          {% else %}
+            Roleta v {{ resolved_room_name }} bola nastavená na {{ pos_value | int }} percent.
+          {% endif %}
+        {% elif action_type == 'open_all' %}
+          {% if covers_count | int > 0 %}
+            Všetky rolety boli otvorené.
+          {% else %}
+            Chýbajú definované rolety. Skontrolujte konfiguráciu.
+          {% endif %}
+        {% elif action_type == 'close_all' %}
+          {% if covers_count | int > 0 %}
+            Všetky rolety boli zatvorené.
+          {% else %}
+            Chýbajú definované rolety. Skontrolujte konfiguráciu.
+          {% endif %}
         {% else %}
-          Chýbajú definované rolety. Skontrolujte konfiguráciu.
+          Neznámy príkaz. Použite "otvor všetky rolety", "zatvor všetky rolety" alebo "nastav roletu v [miestnosť] na [percentá]".
         {% endif %}
 
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ action == 'otvor' and covers_count | int > 0 }}"
+            value_template: "{{ action_type == 'open_all' and covers_count | int > 0 }}"
         sequence:
           - service: cover.open_cover
             target:
               entity_id: "{{ covers_csv }}"
       - conditions:
           - condition: template
-            value_template: "{{ action == 'zatvor' and covers_count | int > 0 }}"
+            value_template: "{{ action_type == 'close_all' and covers_count | int > 0 }}"
         sequence:
           - service: cover.close_cover
             target:
               entity_id: "{{ covers_csv }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ action_type == 'set_position' and pos_valid and resolved_cover_valid }}"
+        sequence:
+          - service: cover.set_cover_position
+            target:
+              entity_id: "{{ resolved_cover }}"
+            data:
+              position: "{{ pos_value | int }}"
 
   - if:
       - condition: template
