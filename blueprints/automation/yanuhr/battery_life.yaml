@@ -79,14 +79,7 @@ action:
   - variables:
       notify_services_filtered: >-
         {% set services = notify_services | default([]) %}
-        {% set filtered = namespace(list=[]) %}
-        {% for svc in services %}
-          {% set svc_str = (svc | string | trim) %}
-          {% if svc_str and svc_str != '' %}
-            {% set _ = filtered.list.append(svc_str) %}
-          {% endif %}
-        {% endfor %}
-        {{ filtered.list }}
+        {{ services | map('string') | map('trim') | reject('equalto', '') | unique | list }}
       memory_list: >-
         {% set raw = states(memory_helper) | string %}
         {% set raw_trimmed = raw | trim %}
@@ -224,15 +217,7 @@ action:
                         recovered_batteries: "{{ recovered_batteries + [{'name': mem_display_name, 'lvl': mem_lvl}] }}"
 
   - variables:
-      next_memory_entities_raw: "{{ current_low_entities + unavailable_memory_entities }}"
-      next_memory_entities: >-
-        {% set unique_list = namespace(items=[]) %}
-        {% for item in next_memory_entities_raw %}
-          {% if item not in unique_list.items %}
-            {% set _ = unique_list.items.append(item) %}
-          {% endif %}
-        {% endfor %}
-        {{ unique_list.items }}
+      next_memory_entities: "{{ (current_low_entities + unavailable_memory_entities) | unique | list }}"
 
   - choose:
       - conditions: "{{ current_low_batteries | length > 0 }}"
