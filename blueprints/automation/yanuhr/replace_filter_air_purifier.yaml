@@ -1,9 +1,8 @@
 blueprint:
-  name: Upozornenie na výmenu filtra (simple / HA 2026.1)
+  name: Upozornenie na výmenu filtra (fan-name / HA 2026.1)
   description: >
-    Pošle upozornenie keď je binary_sensor "replace_filter" ON.
-    Okamžite pri OFF->ON (voliteľné) a denne v čase, kým ostáva ON.
-    Bez helpera a bez ukladania state objektov (žiadne "Undefined").
+    Notifikácia keď je replace_filter binary_sensor ON.
+    Názov berie primárne z fan entity na tom istom zariadení (device registry).
 
   domain: automation
 
@@ -87,7 +86,6 @@ action:
         {% set services = notify_services | default([]) %}
         {{ services | map('string') | map('trim') | reject('equalto','') | unique | list }}
 
-      # DÔLEŽITÉ: ulož len entity_id (stringy), nie state objects
       active_ids: >-
         {{ expand(sensors)
             | selectattr('state','eq','on')
@@ -103,22 +101,35 @@ action:
           false
         {% endif %}
 
+      # Helper template: vyrobí "pekny" label pre jeden binary_sensor
+      # 1) najdi fan.* na tom istom device
+      # 2) pouzi jeho friendly_name
+      # 3) fallback: device name
+      # 4) fallback: friendly_name bin_senzora
       message_text: >-
         {% set total = active_ids | length %}
         {% if total == 0 %}
           {{ '' }}
         {% elif total == 1 %}
           {% set eid = active_ids[0] %}
-          {% set fn = state_attr(eid,'friendly_name') or eid %}
-          {% set ar = area_name(eid) %}
-          {{ (ar ~ ' – ' if ar else '') ~ fn ~ ': vymeň filter.' }}
+          {% set did = device_id(eid) %}
+          {% set ents = device_entities(did) if did else [] %}
+          {% set fan_eid = (ents | select('match','^fan\\.') | list | first) %}
+          {% set dev_name = device_attr(did,'name') if did else none %}
+          {% set name = state_attr(fan_eid,'friendly_name') if fan_eid else (dev_name or state_attr(eid,'friendly_name') or eid) %}
+          {% set ar = area_name(fan_eid) if fan_eid else area_name(eid) %}
+          {{ (ar ~ ' – ' if ar else '') ~ name ~ ': vymeň filter.' }}
         {% else %}
           {% set shown = active_ids[:max_items] %}
           Vymeň filter v týchto čističkách:
           {% for eid in shown %}
-            {% set fn = state_attr(eid,'friendly_name') or eid %}
-            {% set ar = area_name(eid) %}
-            - {{ (ar ~ ' – ' if ar else '') ~ fn }}
+            {% set did = device_id(eid) %}
+            {% set ents = device_entities(did) if did else [] %}
+            {% set fan_eid = (ents | select('match','^fan\\.') | list | first) %}
+            {% set dev_name = device_attr(did,'name') if did else none %}
+            {% set name = state_attr(fan_eid,'friendly_name') if fan_eid else (dev_name or state_attr(eid,'friendly_name') or eid) %}
+            {% set ar = area_name(fan_eid) if fan_eid else area_name(eid) %}
+            - {{ (ar ~ ' – ' if ar else '') ~ name }}
           {% endfor %}
           {% if total > (shown | length) %}
             - … a ďalších {{ total - (shown | length) }}
