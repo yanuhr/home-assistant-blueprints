@@ -78,10 +78,18 @@ variables:
   use_persistent_fallback: !input use_persistent_fallback
   memory_list: >-
     {% set raw = states(memory_helper) | string %}
-    {% if raw | trim in ['', 'unknown', 'unavailable', 'none'] %}
+    {% set raw_trimmed = raw | trim %}
+    {% if raw_trimmed in ['', 'unknown', 'unavailable', 'none'] %}
       []
+    {% elif raw_trimmed is json %}
+      {% set parsed = raw_trimmed | from_json %}
+      {% if parsed is list %}
+        {{ parsed }}
+      {% else %}
+        []
+      {% endif %}
     {% else %}
-      {{ raw | from_json(default=[]) }}
+      []
     {% endif %}
 
 mode: single
