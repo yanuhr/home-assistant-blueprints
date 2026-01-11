@@ -17,13 +17,15 @@ blueprint:
       selector:
         object: {}
 
-    tts_players:
-      name: TTS prehrávače
-      description: Vyberte prehrávače pre spätnú väzbu.
+    assist_satellites:
+      name: Assist Satellites (fallback)
+      description: >
+        Voliteľné: Assist Satellite entity pre spätnú väzbu, ak žiadny nie je v stave 'processing'.
+        Ak nie je zadané, použije sa prvý dostupný.
       default: []
       selector:
         entity:
-          domain: media_player
+          domain: assist_satellite
           multiple: true
 
 trigger:
@@ -35,65 +37,104 @@ trigger:
       - "zatvor vsetky rolety"
 
 variables:
-  covers_map: >
-    {% set input = namespace(val=[]) %}
-    {% set input.val = iif(is_defined(blueprint_inputs.covers_map), blueprint_inputs.covers_map, {}) %}
-    {{ input.val }}
-
-  tts_players: !input tts_players
+  covers_map: !input covers_map
+  assist_satellites: !input assist_satellites
   command_text: "{{ trigger.text | lower }}"
   action: >-
     {% if 'zatvor' in command_text %}zatvor{% elif 'otvor' in command_text %}otvor{% else %}''{% endif %}
-  covers: "{{ covers_map['všetky'] if 'všetky' in covers_map else [] }}"
   matched_entity: >-
-    {% set entities = states.media_player
-      | selectattr('attributes.assist_pipeline_state', 'defined')
-      | selectattr('attributes.assist_pipeline_state', 'eq', 'processing')
-      | map(attribute='entity_id') | list %}
-    {% set intersection = tts_players | select('in', entities) | list %}
-    {{ intersection[0] if intersection | length > 0 else (tts_players[0] if tts_players | length > 0 else '') }}
-  tts_sentence: >-
-    {% if covers | count > 0 and action in ['otvor', 'zatvor'] %}
-      Všetky rolety boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
+    {% set trigger_satellite = none %}
+    {% set dev_id = none %}
+    {% if trigger.device_id is defined %}
+      {% set dev_id = trigger.device_id %}
+    {% elif trigger.platform_data is defined %}
+      {% if trigger.platform_data is mapping %}
+        {% set dev_id = trigger.platform_data.get('device_id') %}
+      {% elif trigger.platform_data.device_id is defined %}
+        {% set dev_id = trigger.platform_data.device_id %}
+      {% endif %}
+    {% endif %}
+    {% if dev_id %}
+      {% set dev_entities = device_entities(dev_id) if dev_id else [] %}
+      {% set trigger_satellite = dev_entities | select('search', 'assist_satellite.') | list | first %}
+    {% endif %}
+    {% if trigger_satellite %}
+      {{ trigger_satellite }}
     {% else %}
-      Neznámy príkaz alebo chýbajúce rolety.
+      {% set processing = states.assist_satellite
+        | selectattr('state', 'eq', 'processing')
+        | map(attribute='entity_id')
+        | list
+        | first %}
+      {% if processing %}
+        {{ processing }}
+      {% elif assist_satellites | length > 0 %}
+        {{ assist_satellites[0] }}
+      {% else %}
+        {% set all_satellites = states.assist_satellite | map(attribute='entity_id') | list %}
+        {{ all_satellites[0] if all_satellites | length > 0 else '' }}
+      {% endif %}
     {% endif %}
 
-condition:
-  - condition: template
-    value_template: "{{ action in ['otvor', 'zatvor'] and covers | count > 0 }}"
-
 action:
-  - service: system_log.write
-    data:
-      level: info
-      message: "DEBUG | action={{ action }} | covers={{ covers }} | covers_map={{ covers_map }}"
+  - variables:
+      covers_count: >-
+        {% if covers_map is mapping %}
+          {% if 'všetky' in covers_map and covers_map['všetky'] is list %}
+            {{ covers_map['všetky'] | length }}
+          {% elif 'vsetky' in covers_map and covers_map['vsetky'] is list %}
+            {{ covers_map['vsetky'] | length }}
+          {% else %}
+            0
+          {% endif %}
+        {% else %}
+          0
+        {% endif %}
+      covers_csv: >-
+        {% if covers_map is mapping %}
+          {% if 'všetky' in covers_map and covers_map['všetky'] is list %}
+            {{ covers_map['všetky'] | join(',') }}
+          {% elif 'vsetky' in covers_map and covers_map['vsetky'] is list %}
+            {{ covers_map['vsetky'] | join(',') }}
+          {% else %}
+            {{ '' }}
+          {% endif %}
+        {% else %}
+          {{ '' }}
+        {% endif %}
+      tts_sentence: >-
+        {% if covers_count | int > 0 and action in ['otvor', 'zatvor'] %}
+          Všetky rolety boli {% if action == 'otvor' %}otvorené{% else %}zatvorené{% endif %}.
+        {% elif action not in ['otvor', 'zatvor'] %}
+          Neznámy príkaz. Použite "otvor všetky rolety" alebo "zatvor všetky rolety".
+        {% else %}
+          Chýbajú definované rolety. Skontrolujte konfiguráciu.
+        {% endif %}
 
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ action == 'otvor' }}"
+            value_template: "{{ action == 'otvor' and covers_count | int > 0 }}"
         sequence:
           - service: cover.open_cover
             target:
-              entity_id: "{{ covers }}"
+              entity_id: "{{ covers_csv }}"
       - conditions:
           - condition: template
-            value_template: "{{ action == 'zatvor' }}"
+            value_template: "{{ action == 'zatvor' and covers_count | int > 0 }}"
         sequence:
           - service: cover.close_cover
             target:
-              entity_id: "{{ covers }}"
+              entity_id: "{{ covers_csv }}"
 
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: "{{ matched_entity != '' }}"
-        sequence:
-          - service: assist_satellite.announce
-            target:
-              entity_id: "{{ matched_entity }}"
-            data:
-              message: "{{ tts_sentence }}"
+  - if:
+      - condition: template
+        value_template: "{{ matched_entity != '' }}"
+    then:
+      - service: assist_satellite.announce
+        target:
+          entity_id: "{{ matched_entity }}"
+        data:
+          message: "{{ tts_sentence }}"
 
 mode: single
