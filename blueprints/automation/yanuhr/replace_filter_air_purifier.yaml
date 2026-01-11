@@ -86,11 +86,14 @@ action:
         {% set services = notify_services | default([]) %}
         {{ services | map('string') | map('trim') | reject('equalto','') | unique | list }}
 
-      active_ids: >-
+      active_sensors: >-
         {{ expand(sensors)
             | selectattr('state','eq','on')
-            | map(attribute='entity_id')
             | list }}
+
+      active_ids: >-
+        {{ active_sensors | map(attribute='entity_id') | list }}
+
 
       should_notify: >-
         {% if run_id in ['daily','manual'] %}
