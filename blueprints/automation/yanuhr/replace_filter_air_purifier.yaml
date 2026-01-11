@@ -1,24 +1,32 @@
 blueprint:
-  name: Upozornenie na výmenu filtra (HA 2026.1 / memory)
+  name: Upozornenie na výmenu filtra (HA 2026.1 / stable)
   description: >
-    Upozorní, keď je treba vymeniť filter (binary_sensor = on).
-    Okamžite pri zmene na on (voliteľné) + denne v čase (kým je stále on).
-    Pamäť je JSON zoznam v input_text.
+    Pošle upozornenie, keď je binary_sensor "replace_filter" v stave ON.
+    - Okamžite pri prechode OFF -> ON (voliteľné)
+    - Denne v čase, kým je stále ON
+    - Memory (input_text) drží zoznam aktuálne aktívnych senzorov, aby sa "immediate" neposielal duplicitne.
+    - Manuálne spustenie sa správa ako denná kontrola.
 
   domain: automation
 
   input:
     filter_sensors:
-      name: Senzory filtra
-      description: Binary_sensors, ktoré idú do ON keď treba vymeniť filter.
+      name: Senzory filtra (binary_sensor)
       selector:
         entity:
           domain: binary_sensor
           multiple: true
 
+    memory_helper:
+      name: Memory helper (input_text)
+      description: Musí obsahovať JSON zoznam, napr. []
+      selector:
+        entity:
+          domain: input_text
+
     notification_services:
       name: Notifikačné služby
-      description: Každú službu (napr. notify.mobile_app_xyz) na nový riadok. Môže byť prázdne.
+      description: Každú službu (napr. notify.mobile_app_xyz) na nový riadok
       default: []
       selector:
         text:
@@ -26,7 +34,7 @@ blueprint:
 
     use_persistent_fallback:
       name: Persistent fallback
-      description: Ak nie sú zadané notify služby, vytvorí sa persistent_notification.
+      description: Ak nie sú notify služby, vytvorí persistent notifikáciu v HA
       default: true
       selector:
         boolean: {}
@@ -38,17 +46,10 @@ blueprint:
         time: {}
 
     immediate_notification:
-      name: Okamžitá notifikácia pri ON
+      name: Okamžitá notifikácia pri OFF->ON
       default: true
       selector:
         boolean: {}
-
-    memory_helper:
-      name: Input text pre pamäť
-      description: input_text, kde je uložený JSON zoznam senzorov, ktoré boli/ sú aktívne (on).
-      selector:
-        entity:
-          domain: input_text
 
     title:
       name: Názov notifikácie
@@ -56,16 +57,18 @@ blueprint:
       selector:
         text: {}
 
+    debug:
+      name: Debug (persistent info pri manuálnom teste)
+      default: false
+      selector:
+        boolean: {}
+
 trigger:
   - platform: state
     entity_id: !input filter_sensors
+    from: "off"
     to: "on"
     id: became_on
-
-  - platform: state
-    entity_id: !input filter_sensors
-    to: "off"
-    id: became_off
 
   - platform: time
     at: !input notification_time
@@ -73,31 +76,24 @@ trigger:
 
 variables:
   sensor_entities: !input filter_sensors
+  memory_helper: !input memory_helper
   notify_services: !input notification_services
   use_persistent: !input use_persistent_fallback
   immediate: !input immediate_notification
-  memory_helper: !input memory_helper
   title: !input title
+  debug: !input debug
+
+  # Manuálne spustenie nemá vždy trigger.id -> spravíme z neho "manual"
+  run_id: >-
+    {% if trigger is defined and trigger.id is defined and trigger.id %}
+      {{ trigger.id }}
+    {% else %}
+      manual
+    {% endif %}
 
   notify_services_filtered: >-
     {% set services = notify_services | default([]) %}
     {{ services | map('string') | map('trim') | reject('equalto', '') | unique | list }}
-
-  memory_list: >-
-    {% set raw = states(memory_helper) | string %}
-    {% set t = raw | trim %}
-    {% if t in ['', 'unknown', 'unavailable', 'none'] %}
-      []
-    {% elif t | length >= 2 and t[0] == '[' and t[-1] == ']' %}
-      {% set parsed = t | from_json %}
-      {% if parsed is list %}
-        {{ parsed }}
-      {% else %}
-        []
-      {% endif %}
-    {% else %}
-      []
-    {% endif %}
 
   active_sensors: >-
     {{ expand(sensor_entities) | selectattr('state', 'eq', 'on') | list }}
@@ -105,49 +101,68 @@ variables:
   active_entity_ids: >-
     {{ active_sensors | map(attribute='entity_id') | list }}
 
+  # Memory list (očakáva sa JSON list, ideálne [] keď je prázdny)
+  memory_list: >-
+    {% set raw = states(memory_helper) | string | trim %}
+    {% if raw in ['', 'unknown', 'unavailable', 'none'] %}
+      []
+    {% elif raw | length >= 2 and raw[0] == '[' and raw[-1] == ']' %}
+      {{ raw | from_json }}
+    {% else %}
+      []
+    {% endif %}
+
   message_text: >-
-    {% set active = active_sensors %}
-    {% if active | length == 1 %}
-      {% set s = active[0] %}
+    {% if active_sensors | length == 1 %}
+      {% set s = active_sensors[0] %}
       {% set a = area_name(s.entity_id) %}
       {{ (a or 'Neznáma miestnosť') ~ ' – ' ~ s.name ~ ': vymeň filter.' }}
     {% else %}
       Vymeň filter v týchto čističkách:
-      {% for s in active %}
+      {% for s in active_sensors %}
         {% set a = area_name(s.entity_id) %}
         - {{ (a or 'Neznáma miestnosť') ~ ' – ' ~ s.name }}
       {% endfor %}
     {% endif %}
 
+  # Kedy poslať notifikáciu:
+  # - daily: keď je aspoň 1 aktívny
+  # - manual: rovnako ako daily (aby sa dalo testovať)
+  # - became_on: len ak immediate=true a daný entity_id ešte nebol v memory_list
+  should_notify: >-
+    {% if run_id in ['daily', 'manual'] %}
+      {{ active_sensors | length > 0 }}
+    {% elif run_id == 'became_on' %}
+      {{ immediate and (trigger.entity_id not in memory_list) }}
+    {% else %}
+      false
+    {% endif %}
+
+  next_memory: >-
+    {{ active_entity_ids | unique | list }}
+
 mode: queued
 max: 10
 
 action:
-  # 1) Update memory according to current on/off state
-  - variables:
-      next_memory: >-
-        {% if trigger.id == 'became_off' %}
-          {{ memory_list | reject('equalto', trigger.entity_id) | list }}
-        {% elif trigger.id == 'became_on' %}
-          {{ (memory_list + [trigger.entity_id]) | unique | list }}
-        {% else %}
-          {{ memory_list }}
-        {% endif %}
+  - if:
+      - condition: template
+        value_template: "{{ debug and run_id == 'manual' }}"
+    then:
+      - service: persistent_notification.create
+        data:
+          notification_id: "filter_debug"
+          title: "Filter Debug"
+          message: >-
+            run_id={{ run_id }}
+            active={{ active_entity_ids | join(', ') if active_entity_ids|length else 'none' }}
+            memory={{ memory_list | join(', ') if memory_list|length else '[]' }}
+            should_notify={{ should_notify }}
 
-  - service: input_text.set_value
-    target:
-      entity_id: !input memory_helper
-    data:
-      value: "{{ next_memory | to_json }}"
-
-  # 2) Decide whether to notify
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ active_sensors | length > 0 }}"
-          - condition: template
-            value_template: >
-              {{ trigger.id == 'daily' or (trigger.id == 'became_on' and immediate) }}
+            value_template: "{{ should_notify }}"
         sequence:
           - choose:
               - conditions:
@@ -162,13 +177,19 @@ action:
                             title: "{{ title }}"
                             message: "{{ message_text }}"
             default:
-              - choose:
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ use_persistent }}"
-                    sequence:
-                      - service: persistent_notification.create
-                        data:
-                          notification_id: "filter_replace"
-                          title: "{{ title }}"
-                          message: "{{ message_text }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ use_persistent }}"
+                then:
+                  - service: persistent_notification.create
+                    data:
+                      notification_id: "filter_replace"
+                      title: "{{ title }}"
+                      message: "{{ message_text }}"
+
+  # Memory vždy zosynchronizujeme na aktuálne ON senzory
+  - service: input_text.set_value
+    target:
+      entity_id: !input memory_helper
+    data:
+      value: "{{ next_memory | to_json }}"
