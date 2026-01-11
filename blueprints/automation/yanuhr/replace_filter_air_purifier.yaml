@@ -1,8 +1,9 @@
 blueprint:
-  name: Upozornenie na výmenu filtra (fan-name / HA 2026.1)
+  name: Upozornenie na výmenu filtra (fan-name / HA 2026.1) - stable
   description: >
     Notifikácia keď je replace_filter binary_sensor ON.
-    Názov berie primárne z fan entity na tom istom zariadení (device registry).
+    Pri OFF->ON notifikuje primárne len ten konkrétny senzor (stabilné).
+    Pri dennej notifikácii vypíše všetky aktívne. Názov berie z fan entity na rovnakom device.
 
   domain: automation
 
@@ -56,6 +57,12 @@ blueprint:
           mode: slider
           step: 1
 
+    debug:
+      name: Debug (vytvorí persistent notif s diagnostikou)
+      default: false
+      selector:
+        boolean: {}
+
 trigger:
   - platform: state
     entity_id: !input filter_sensors
@@ -77,20 +84,41 @@ variables:
   immediate: !input immediate_notification
   title: !input title
   max_items: !input max_list_items
+  debug: !input debug
 
 action:
   - variables:
-      run_id: "{{ trigger.id if trigger is defined and trigger.id is defined else 'manual' }}"
+      run_id: >-
+        {% if trigger is defined and trigger.id is defined %}
+          {{ trigger.id }}
+        {% else %}
+          manual
+        {% endif %}
 
       notify_services_filtered: >-
         {% set services = notify_services | default([]) %}
         {{ services | map('string') | map('trim') | reject('equalto','') | unique | list }}
 
-      active_ids: >-
+      # všetky on (pre daily/manual)
+      active_ids_all: >-
         {{ expand(sensors)
             | selectattr('state','eq','on')
             | map(attribute='entity_id')
             | list }}
+
+      # stabilné správanie:
+      # - became_on: notifikuje len konkrétny triggerovaný senzor (ak immediate true)
+      # - daily/manual: všetky ON
+      active_ids: >-
+        {% if run_id == 'became_on' %}
+          {% if trigger is defined and trigger.entity_id is defined %}
+            {{ [trigger.entity_id] }}
+          {% else %}
+            {{ active_ids_all }}
+          {% endif %}
+        {% else %}
+          {{ active_ids_all }}
+        {% endif %}
 
       should_notify: >-
         {% if run_id in ['daily','manual'] %}
@@ -101,44 +129,40 @@ action:
           false
         {% endif %}
 
+      # pomocná funkcia "label" pre jedno eid (bez objektov, iba stringy -> bez warningov)
       message_text: >-
         {% set total = active_ids | length %}
         {% if total == 0 %}
           {{ '' }}
         {% elif total == 1 %}
           {% set eid = active_ids[0] %}
-
-          {% set did = device_id(eid) | default(none) %}
-          {% set ents = (device_entities(did) if did else []) %}
-          {% set fan_eid = (ents | select('match','^fan\\.') | list | first) | default(none) %}
+          {% set did = device_id(eid) %}
+          {% set ents = device_entities(did) if did else [] %}
+          {% set fan_candidates = (ents | map('string') | select('match','^fan\\.') | list) %}
+          {% set fan_eid = (fan_candidates[0] if (fan_candidates | length) > 0 else none) %}
 
           {% set dev_name = (device_attr(did,'name') if did else none) %}
           {% set fan_name = (state_attr(fan_eid,'friendly_name') if fan_eid else none) %}
           {% set bin_name = state_attr(eid,'friendly_name') %}
-
           {% set name = (fan_name or dev_name or bin_name or eid) %}
 
-          {# Area preferuj z device (stabilnejšie než z entity), fallback na sensor #}
-          {% set ar = (area_name(did) if did else area_name(eid)) %}
-
+          {% set ar = (area_name(fan_eid) if fan_eid else area_name(eid)) %}
           {{ (ar ~ ' – ' if ar else '') ~ name ~ ': vymeň filter.' }}
-
         {% else %}
           {% set shown = active_ids[0:max_items] %}
           Vymeň filter v týchto čističkách:
           {% for eid in shown %}
-
-            {% set did = device_id(eid) | default(none) %}
-            {% set ents = (device_entities(did) if did else []) %}
-            {% set fan_eid = (ents | select('match','^fan\\.') | list | first) | default(none) %}
+            {% set did = device_id(eid) %}
+            {% set ents = device_entities(did) if did else [] %}
+            {% set fan_candidates = (ents | map('string') | select('match','^fan\\.') | list) %}
+            {% set fan_eid = (fan_candidates[0] if (fan_candidates | length) > 0 else none) %}
 
             {% set dev_name = (device_attr(did,'name') if did else none) %}
             {% set fan_name = (state_attr(fan_eid,'friendly_name') if fan_eid else none) %}
             {% set bin_name = state_attr(eid,'friendly_name') %}
-
             {% set name = (fan_name or dev_name or bin_name or eid) %}
-            {% set ar = (area_name(did) if did else area_name(eid)) %}
 
+            {% set ar = (area_name(fan_eid) if fan_eid else area_name(eid)) %}
             - {{ (ar ~ ' – ' if ar else '') ~ name }}
           {% endfor %}
           {% if total > (shown | length) %}
@@ -146,10 +170,24 @@ action:
           {% endif %}
         {% endif %}
 
+  - if:
+      - condition: template
+        value_template: "{{ debug }}"
+    then:
+      - service: persistent_notification.create
+        data:
+          notification_id: "filter_replace_debug"
+          title: "Filter debug"
+          message: >-
+            run_id={{ run_id }}
+            should_notify={{ should_notify }}
+            active_ids={{ active_ids }}
+            active_ids_all={{ active_ids_all }}
+
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ should_notify and (active_ids | length > 0) }}"
+            value_template: "{{ should_notify and (message_text | length > 0) }}"
         sequence:
           - choose:
               - conditions:
