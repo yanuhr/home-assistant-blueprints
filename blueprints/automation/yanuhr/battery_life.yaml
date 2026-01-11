@@ -15,6 +15,7 @@ blueprint:
           multiple: true
           filter:
             - domain: sensor
+            - device_class: battery
 
     threshold:
       name: Prah batérie (%)
@@ -50,7 +51,7 @@ blueprint:
 
     memory_helper:
       name: Input text pre pamäť
-      description: input_text, kde sa ukladá JSON zoznam už notifikovaných entít.
+      description: input_text, kde sa ukladá JSON zoznam momentálne nízkych batérií z posledného behu.
       selector:
         entity:
           domain: input_text
@@ -77,49 +78,137 @@ mode: single
 
 action:
   - variables:
-      low_batteries: []
+      current_low_entities: []
+      current_low_batteries: []
       recovered_batteries: []
-      updated_memory: "{{ memory_list }}"
 
   - repeat:
       for_each: "{{ sensors }}"
       sequence:
         - variables:
             ent: "{{ repeat.item }}"
-            name: "{{ state_attr(repeat.item, 'friendly_name') or repeat.item }}"
+            state_val: "{{ states(repeat.item) | string }}"
             lvl: >-
               {% set v = states(repeat.item) %}
               {% if v is number %}
                 {{ v | float }}
               {% elif (v|string|lower) in ['unknown','unavailable','none'] %}
-                100
+                null
               {% else %}
-                {{ v | float(100) }}
+                {{ v | float(default=null) }}
               {% endif %}
-            was_notified: "{{ ent in updated_memory }}"
 
         - if:
             - condition: template
-              value_template: "{{ lvl < threshold }}"
+              value_template: "{{ lvl is not none }}"
           then:
+            - variables:
+                dev_id: "{{ device_id(repeat.item) }}"
+                dev_name: >-
+                  {% set d_id = device_id(repeat.item) %}
+                  {% if d_id %}
+                    {% set d_name = device_attr(d_id, 'name') %}
+                    {% if d_name %}
+                      {{ d_name }}
+                    {% else %}
+                      {{ state_attr(repeat.item, 'friendly_name') or repeat.item }}
+                    {% endif %}
+                  {% else %}
+                    {{ state_attr(repeat.item, 'friendly_name') or repeat.item }}
+                  {% endif %}
+                area: "{{ area_name(repeat.item) }}"
+                display_name: >-
+                  {% set d_id = device_id(repeat.item) %}
+                  {% set d_name = none %}
+                  {% if d_id %}
+                    {% set d_name = device_attr(d_id, 'name') %}
+                  {% endif %}
+                  {% if not d_name %}
+                    {% set d_name = state_attr(repeat.item, 'friendly_name') or repeat.item %}
+                  {% endif %}
+                  {% set a = area_name(repeat.item) %}
+                  {% if a %}
+                    {{ a }} – {{ d_name }}
+                  {% else %}
+                    {{ d_name }}
+                  {% endif %}
+
             - if:
                 - condition: template
-                  value_template: "{{ not was_notified }}"
+                  value_template: "{{ lvl < threshold }}"
               then:
                 - variables:
-                    low_batteries: "{{ low_batteries + [name] }}"
-                    updated_memory: "{{ updated_memory + [ent] }}"
-          else:
-            - if:
-                - condition: template
-                  value_template: "{{ was_notified }}"
-              then:
-                - variables:
-                    recovered_batteries: "{{ recovered_batteries + [name] }}"
-                    updated_memory: "{{ updated_memory | reject('equalto', ent) | list }}"
+                    current_low_entities: "{{ current_low_entities + [ent] }}"
+                    current_low_batteries: "{{ current_low_batteries + [{'name': display_name, 'lvl': lvl}] }}"
+
+  - variables:
+      recovered_entities: []
+
+  - repeat:
+      for_each: "{{ memory_list }}"
+      sequence:
+        - if:
+            - condition: template
+              value_template: "{{ repeat.item not in current_low_entities }}"
+          then:
+            - variables:
+                recovered_entities: "{{ recovered_entities + [repeat.item] }}"
+
+  - repeat:
+      for_each: "{{ recovered_entities }}"
+      sequence:
+        - variables:
+            ent: "{{ repeat.item }}"
+            state_val: "{{ states(repeat.item) | string }}"
+            lvl: >-
+              {% set v = states(repeat.item) %}
+              {% if v is number %}
+                {{ v | float }}
+              {% elif (v|string|lower) in ['unknown','unavailable','none'] %}
+                null
+              {% else %}
+                {{ v | float(default=null) }}
+              {% endif %}
+
+        - if:
+            - condition: template
+              value_template: "{{ lvl is not none }}"
+          then:
+            - variables:
+                dev_id: "{{ device_id(repeat.item) }}"
+                dev_name: >-
+                  {% set d_id = device_id(repeat.item) %}
+                  {% if d_id %}
+                    {% set d_name = device_attr(d_id, 'name') %}
+                    {% if d_name %}
+                      {{ d_name }}
+                    {% else %}
+                      {{ state_attr(repeat.item, 'friendly_name') or repeat.item }}
+                    {% endif %}
+                  {% else %}
+                    {{ state_attr(repeat.item, 'friendly_name') or repeat.item }}
+                  {% endif %}
+                area: "{{ area_name(repeat.item) }}"
+                display_name: >-
+                  {% set d_id = device_id(repeat.item) %}
+                  {% set d_name = none %}
+                  {% if d_id %}
+                    {% set d_name = device_attr(d_id, 'name') %}
+                  {% endif %}
+                  {% if not d_name %}
+                    {% set d_name = state_attr(repeat.item, 'friendly_name') or repeat.item %}
+                  {% endif %}
+                  {% set a = area_name(repeat.item) %}
+                  {% if a %}
+                    {{ a }} – {{ d_name }}
+                  {% else %}
+                    {{ d_name }}
+                  {% endif %}
+            - variables:
+                recovered_batteries: "{{ recovered_batteries + [{'name': display_name, 'lvl': lvl}] }}"
 
   - choose:
-      - conditions: "{{ low_batteries | length > 0 }}"
+      - conditions: "{{ current_low_batteries | length > 0 }}"
         sequence:
           - if:
               - condition: template
@@ -134,21 +223,23 @@ action:
                         message: >-
                           Zariadenia pod {{ threshold }}%:
 
-                          {% for n in low_batteries %}
-                          - {{ n }}
+                          {% for item in current_low_batteries %}
+                          - {{ item.name }} ({{ item.lvl | round(0) }}%)
                           {% endfor %}
             else:
-              - condition: template
-                value_template: "{{ use_persistent_fallback }}"
-              - service: persistent_notification.create
-                data:
-                  title: "Upozornenie: Nízka batéria"
-                  message: >-
-                    Zariadenia pod {{ threshold }}%:
+              - if:
+                  - condition: template
+                    value_template: "{{ use_persistent_fallback }}"
+                then:
+                  - service: persistent_notification.create
+                    data:
+                      title: "Upozornenie: Nízka batéria"
+                      message: >-
+                        Zariadenia pod {{ threshold }}%:
 
-                    {% for n in low_batteries %}
-                    - {{ n }}
-                    {% endfor %}
+                        {% for item in current_low_batteries %}
+                        - {{ item.name }} ({{ item.lvl | round(0) }}%)
+                        {% endfor %}
 
   - choose:
       - conditions: "{{ recovered_batteries | length > 0 }}"
@@ -166,24 +257,26 @@ action:
                         message: >-
                           Zariadenia opäť nad {{ threshold }}%:
 
-                          {% for n in recovered_batteries %}
-                          - {{ n }}
+                          {% for item in recovered_batteries %}
+                          - {{ item.name }} ({{ item.lvl | round(0) }}%)
                           {% endfor %}
             else:
-              - condition: template
-                value_template: "{{ use_persistent_fallback }}"
-              - service: persistent_notification.create
-                data:
-                  title: "Batéria obnovená"
-                  message: >-
-                    Zariadenia opäť nad {{ threshold }}%:
+              - if:
+                  - condition: template
+                    value_template: "{{ use_persistent_fallback }}"
+                then:
+                  - service: persistent_notification.create
+                    data:
+                      title: "Batéria obnovená"
+                      message: >-
+                        Zariadenia opäť nad {{ threshold }}%:
 
-                    {% for n in recovered_batteries %}
-                    - {{ n }}
-                    {% endfor %}
+                        {% for item in recovered_batteries %}
+                        - {{ item.name }} ({{ item.lvl | round(0) }}%)
+                        {% endfor %}
 
   - service: input_text.set_value
     target:
       entity_id: !input memory_helper
     data:
-      value: "{{ updated_memory | to_json }}"
+      value: "{{ current_low_entities | to_json }}"
