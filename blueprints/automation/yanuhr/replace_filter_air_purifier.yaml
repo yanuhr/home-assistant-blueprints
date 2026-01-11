@@ -1,14 +1,16 @@
 blueprint:
-  name: Upozornenie na výmenu filtra v čističke vzduchu (simple / HA 2026.1)
+  name: Upozornenie na výmenu filtra (HA 2026.1 / memory)
   description: >
-    Pošle notifikáciu, keď je aspoň jeden z vybraných binary_sensor filtrov v stave ON.
-    Voliteľne pošle hneď pri zmene na ON, a/alebo denne v zadanom čase.
+    Upozorní, keď je treba vymeniť filter (binary_sensor = on).
+    Okamžite pri zmene na on (voliteľné) + denne v čase (kým je stále on).
+    Pamäť je JSON zoznam v input_text.
+
   domain: automation
 
   input:
     filter_sensors:
-      name: Senzory "výmena filtra"
-      description: Vyber binary_sensor entity, ktoré idú do ON keď treba vymeniť filter.
+      name: Senzory filtra
+      description: Binary_sensors, ktoré idú do ON keď treba vymeniť filter.
       selector:
         entity:
           domain: binary_sensor
@@ -22,6 +24,13 @@ blueprint:
         text:
           multiple: true
 
+    use_persistent_fallback:
+      name: Persistent fallback
+      description: Ak nie sú zadané notify služby, vytvorí sa persistent_notification.
+      default: true
+      selector:
+        boolean: {}
+
     notification_time:
       name: Čas dennej notifikácie
       default: "08:00:00"
@@ -34,15 +43,15 @@ blueprint:
       selector:
         boolean: {}
 
-    use_persistent_fallback:
-      name: Persistent fallback
-      description: Ak nie sú zadané notify služby, spraví persistent_notification v HA.
-      default: true
+    memory_helper:
+      name: Input text pre pamäť
+      description: input_text, kde je uložený JSON zoznam senzorov, ktoré boli/ sú aktívne (on).
       selector:
-        boolean: {}
+        entity:
+          domain: input_text
 
     title:
-      name: Titul notifikácie
+      name: Názov notifikácie
       default: "Výmena filtra"
       selector:
         text: {}
@@ -53,6 +62,11 @@ trigger:
     to: "on"
     id: became_on
 
+  - platform: state
+    entity_id: !input filter_sensors
+    to: "off"
+    id: became_off
+
   - platform: time
     at: !input notification_time
     id: daily
@@ -60,23 +74,43 @@ trigger:
 variables:
   sensor_entities: !input filter_sensors
   notify_services: !input notification_services
-  immediate: !input immediate_notification
   use_persistent: !input use_persistent_fallback
+  immediate: !input immediate_notification
+  memory_helper: !input memory_helper
   title: !input title
 
   notify_services_filtered: >-
     {% set services = notify_services | default([]) %}
     {{ services | map('string') | map('trim') | reject('equalto', '') | unique | list }}
 
+  memory_list: >-
+    {% set raw = states(memory_helper) | string %}
+    {% set t = raw | trim %}
+    {% if t in ['', 'unknown', 'unavailable', 'none'] %}
+      []
+    {% elif t | length >= 2 and t[0] == '[' and t[-1] == ']' %}
+      {% set parsed = t | from_json %}
+      {% if parsed is list %}
+        {{ parsed }}
+      {% else %}
+        []
+      {% endif %}
+    {% else %}
+      []
+    {% endif %}
+
   active_sensors: >-
     {{ expand(sensor_entities) | selectattr('state', 'eq', 'on') | list }}
+
+  active_entity_ids: >-
+    {{ active_sensors | map(attribute='entity_id') | list }}
 
   message_text: >-
     {% set active = active_sensors %}
     {% if active | length == 1 %}
       {% set s = active[0] %}
       {% set a = area_name(s.entity_id) %}
-      {{ (a or 'Neznáma miestnosť') ~ ' – ' ~ s.name ~ ': Vymeň filter.' }}
+      {{ (a or 'Neznáma miestnosť') ~ ' – ' ~ s.name ~ ': vymeň filter.' }}
     {% else %}
       Vymeň filter v týchto čističkách:
       {% for s in active %}
@@ -89,6 +123,24 @@ mode: queued
 max: 10
 
 action:
+  # 1) Update memory according to current on/off state
+  - variables:
+      next_memory: >-
+        {% if trigger.id == 'became_off' %}
+          {{ memory_list | reject('equalto', trigger.entity_id) | list }}
+        {% elif trigger.id == 'became_on' %}
+          {{ (memory_list + [trigger.entity_id]) | unique | list }}
+        {% else %}
+          {{ memory_list }}
+        {% endif %}
+
+  - service: input_text.set_value
+    target:
+      entity_id: !input memory_helper
+    data:
+      value: "{{ next_memory | to_json }}"
+
+  # 2) Decide whether to notify
   - choose:
       - conditions:
           - condition: template
