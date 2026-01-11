@@ -1,13 +1,14 @@
 blueprint:
-  name: Upozornenie na výmenu filtra v čističke vzduchu
+  name: Upozornenie na výmenu filtra v čističke vzduchu (simple / HA 2026.1)
   description: >
-    Upozorňuje používateľa, keď je potrebné vymeniť filter v čističke vzduchu.
-    Funguje pre viacero senzorov a notifikačných služieb. Stateless automatizácia.
-
+    Pošle notifikáciu, keď je aspoň jeden z vybraných binary_sensor filtrov v stave ON.
+    Voliteľne pošle hneď pri zmene off->on, a/alebo denne v zadanom čase.
   domain: automation
+
   input:
     filter_sensors:
-      name: Senzory filtra
+      name: Senzory "výmena filtra"
+      description: Vyber binary_sensor entity, ktoré idú do ON keď treba vymeniť filter.
       selector:
         entity:
           domain: binary_sensor
@@ -15,6 +16,7 @@ blueprint:
 
     notification_services:
       name: Notifikačné služby
+      description: Každú službu (napr. notify.mobile_app_xyz) na nový riadok. Môže byť prázdne.
       default: []
       selector:
         text:
@@ -27,68 +29,92 @@ blueprint:
         time: {}
 
     immediate_notification:
-      name: Okamžitá notifikácia
+      name: Okamžitá notifikácia pri ON
       default: true
       selector:
         boolean: {}
 
+    use_persistent_fallback:
+      name: Persistent fallback
+      description: Ak nie sú zadané notify služby, spraví persistent_notification v HA.
+      default: true
+      selector:
+        boolean: {}
+
+    title:
+      name: Titul notifikácie
+      default: "Výmena filtra"
+      selector:
+        text: {}
+
 trigger:
   - platform: state
     entity_id: !input filter_sensors
-    from: "off"
     to: "on"
+    id: became_on
 
   - platform: time
     at: !input notification_time
+    id: daily
+
+variables:
+  sensor_entities: !input filter_sensors
+  immediate: !input immediate_notification
+  use_persistent: !input use_persistent_fallback
+  title: !input title
+
+  notify_services_filtered: >-
+    {% set services = (!input notification_services) | default([]) %}
+    {{ services | map('string') | map('trim') | reject('equalto', '') | unique | list }}
+
+  active_sensors: >-
+    {{ expand(sensor_entities) | selectattr('state', 'eq', 'on') | list }}
+
+  message_text: >-
+    {% set active = active_sensors %}
+    {% if active | length == 1 %}
+      {% set s = active[0] %}
+      {% set a = area_name(s.entity_id) %}
+      {{ (a or 'Neznáma miestnosť') ~ ' – ' ~ s.name ~ ': Vymeň filter.' }}
+    {% else %}
+      Vymeň filter v týchto čističkách:
+      {% for s in active %}
+        {% set a = area_name(s.entity_id) %}
+        - {{ (a or 'Neznáma miestnosť') ~ ' – ' ~ s.name }}
+      {% endfor %}
+    {% endif %}
+
+mode: queued
+max: 10
 
 action:
-  - variables:
-      sensor_entities: !input filter_sensors
-      notify_services: !input notification_services
-      notify_now: !input immediate_notification
-
-  - variables:
-      active_sensors: >
-        {% set list = namespace(items=[]) %}
-        {% for s in expand(sensor_entities) %}
-          {% if s.state == 'on' %}
-            {% set list.items = list.items + [s] %}
-          {% endif %}
-        {% endfor %}
-        {{ list.items }}
-      message_text: >
-        {% if active_sensors | length == 0 %}
-          {{ '' }}
-        {% elif active_sensors | length == 1 %}
-          {% set s = active_sensors[0] %}
-          {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}: Vymeň filter!
-        {% else %}
-          Vymeň filter v týchto čističkách:
-          {% for s in active_sensors %}
-            • {{ area_name(s.entity_id) | default("Neznáma miestnosť") }} – {{ s.name }}
-          {% endfor %}
-        {% endif %}
-
   - choose:
       - conditions:
           - condition: template
             value_template: "{{ active_sensors | length > 0 }}"
           - condition: template
-            value_template: "{{ notify_services | length > 0 }}"
-          - condition: or
-            conditions:
-              - condition: template
-                value_template: "{{ trigger.platform == 'time' }}"
-              - condition: template
-                value_template: "{{ trigger.platform == 'state' and notify_now }}"
+            value_template: >
+              {{ trigger.id == 'daily' or (trigger.id == 'became_on' and immediate) }}
         sequence:
-          - repeat:
-              for_each: "{{ notify_services }}"
-              sequence:
-                - service: "{{ repeat.item }}"
-                  data:
-                    title: "Výmena filtra"
-                    message: "{{ message_text }}"
-
-mode: queued
-max: 10
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_services_filtered | length > 0 }}"
+                sequence:
+                  - repeat:
+                      for_each: "{{ notify_services_filtered }}"
+                      sequence:
+                        - service: "{{ repeat.item }}"
+                          data:
+                            title: "{{ title }}"
+                            message: "{{ message_text }}"
+            default:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ use_persistent }}"
+                    sequence:
+                      - service: persistent_notification.create
+                        data:
+                          title: "{{ title }}"
+                          message: "{{ message_text }}"
