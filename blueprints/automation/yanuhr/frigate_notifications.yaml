@@ -1,10 +1,10 @@
 blueprint:
-  name: Frigate – mobilné notifikácie (reviews)
+  name: Frigate – mobilné notifikácie (eventy)
   description: >
-    Posiela push notifikácie do mobilnej aplikácie pri review udalostiach z Frigate.
-    Reaguje na MQTT topic frigate/reviews (odporúčaný smer pre notifikácie), filtruje podľa kamery,
-    objektov (data.objects) a voliteľne zóny (data.zones). Obrázok cez HA endpoint /api/frigate/notifications/...
-    Jedna notifikácia na review (typ end alebo new podľa voľby), s cooldown po odoslaní.
+    Posiela push notifikácie do mobilnej aplikácie pri eventoch z Frigate.
+    Reaguje na MQTT topic frigate/events, filtruje podľa kamery (after.camera), labelu (after.label),
+    voliteľne zóny (after.current_zones / entered_zones) a severity (after.max_severity).
+    Obrázok cez HA endpoint /api/frigate/notifications/{event_id}/{image_type}.jpg ak má event snapshot.
   domain: automation
 
   input:
@@ -22,7 +22,7 @@ blueprint:
 
     object_labels:
       name: Objekty spúšťajúce notifikáciu
-      description: Notifikácia sa odošle, ak review obsahuje aspoň jeden z týchto objektov (data.objects).
+      description: Notifikácia sa odošle, ak after.label je v zozname (napr. person, car).
       default:
         - person
         - car
@@ -42,16 +42,14 @@ blueprint:
 
     notification_title:
       name: Titulok notifikácie
-      description: >
-        Placeholdery: {{ camera_name }}, {{ label }} (zoznam objektov z review, napr. person, car).
+      description: Placeholdery {{ camera_name }}, {{ label }}.
       default: "Frigate: {{ camera_name }}"
       selector:
         text: {}
 
     message_template:
       name: Text správy
-      description: >
-        Placeholdery: {{ camera_name }}, {{ label }} (objekty z review).
+      description: Placeholdery {{ camera_name }}, {{ label }}.
       default: "Detekované: {{ label }} ({{ camera_name }})"
       selector:
         text: {}
@@ -68,14 +66,14 @@ blueprint:
 
     zone_filter:
       name: Zóna (voliteľné)
-      description: Ak je vyplnené, notifikácia len ak review obsahuje túto zónu v data.zones.
+      description: Ak je vyplnené, notifikácia len ak zóna je v after.current_zones alebo after.entered_zones.
       default: ""
       selector:
         text: {}
 
     image_type:
       name: Typ obrázka
-      description: Thumbnail alebo snapshot. Obrázok z prvého event_id v data.detections.
+      description: Thumbnail alebo snapshot. Obrázok z after.id, len ak after.has_snapshot je true.
       default: snapshot
       selector:
         select:
@@ -85,16 +83,14 @@ blueprint:
 
     home_assistant_url:
       name: Home Assistant URL (pre obrázok)
-      description: >
-        Základná URL HA (bez lomítka). Pre mobil potrebná na stiahnutie obrázka.
+      description: Základná URL HA (bez lomítka). Pre mobil potrebná na stiahnutie obrázka.
       default: ""
       selector:
         text: {}
 
     event_type_filter:
-      name: Typ review správy
-      description: >
-        "end" = jedna notifikácia po skončení review. "new" = hneď pri začatí (môže byť viac).
+      name: Typ eventu
+      description: "end" = jedna notifikácia po skončení. "new" = hneď pri detekcii.
       default: end
       selector:
         select:
@@ -104,9 +100,7 @@ blueprint:
 
     severity_filter:
       name: Severity (voliteľné)
-      description: >
-        Notifikácia len keď review má zvolenú severity (after.severity).
-        "Bez filtra" = akákoľvek severity, "detection" / "alert" = len táto.
+      description: Notifikácia len keď after.max_severity sedí. "any" = bez filtra.
       default: any
       selector:
         select:
@@ -124,26 +118,23 @@ blueprint:
 
 trigger:
   - platform: mqtt
-    topic: frigate/reviews
+    topic: frigate/events
 
 variables:
-  # 1) Payload parsing – frigate/reviews: { type, before, after }; before/after majú id, camera, severity, data: { detections[], objects[], zones[] }
-  event_data: >-
-    {{ (trigger.payload if trigger.payload is mapping else (trigger.payload or '{}') | from_json(default={})) | default({}) }}
-  after_data: "{{ (event_data.get('after') if event_data.get('after') is mapping else event_data) | default(event_data) }}"
+  # 1) Payload parsing – MQTT JSON z frigate/events: { type, before, after }
+  event_data: "{{ trigger.payload_json | default({}, true) }}"
+  after_data: "{{ (event_data.get('after') if event_data.get('after') is mapping else {}) | default({}) }}"
   before_data: "{{ (event_data.get('before') if event_data.get('before') is mapping else {}) | default({}) }}"
-  review_data: "{{ (after_data.get('data') if after_data.get('data') is mapping else {}) | default({}) }}"
-  before_review_data: "{{ (before_data.get('data') if before_data.get('data') is mapping else {}) | default({}) }}"
 
   camera_name: "{{ (after_data.get('camera') or event_data.get('camera') or '') | string }}"
-  event_type: "{{ (event_data.get('type') or event_data.get('event_type') or '') | string }}"
-  severity: "{{ (after_data.get('severity') or '') | string }}"
+  event_type: "{{ (event_data.get('type') or '') | string }}"
+  label: "{{ (after_data.get('label') or '') | string }}"
+  severity: "{{ (after_data.get('max_severity') or '') | string }}"
+  event_id: "{{ (after_data.get('id') or '') | string }}"
+  has_snapshot: "{{ 1 if after_data.get('has_snapshot') else 0 }}"
 
-  objects_list: "{{ (review_data.get('objects') if (review_data.get('objects') is iterable and review_data.get('objects') is not string) else []) | default([]) }}"
-  zones_list: "{{ (review_data.get('zones') if (review_data.get('zones') is iterable and review_data.get('zones') is not string) else []) | default([]) }}"
-  detections_after: "{{ (review_data.get('detections') if (review_data.get('detections') is iterable and review_data.get('detections') is not string) else []) | default([]) }}"
-  detections_before: "{{ (before_review_data.get('detections') if (before_review_data.get('detections') is iterable and before_review_data.get('detections') is not string) else []) | default([]) }}"
-  event_id: "{{ ((detections_after | first) or (detections_before | first) or '') | string }}"
+  zones_list: "{{ (after_data.get('current_zones') if (after_data.get('current_zones') is iterable and after_data.get('current_zones') is not string) else []) | default([]) }}"
+  entered_zones_list: "{{ (after_data.get('entered_zones') if (after_data.get('entered_zones') is iterable and after_data.get('entered_zones') is not string) else []) | default([]) }}"
 
   # 2) Mapovanie blueprint inputs cez !input
   inp_camera_name: !input frigate_camera_name
@@ -159,25 +150,16 @@ variables:
   inp_severity_filter: !input severity_filter
   inp_home_assistant_url: !input home_assistant_url
 
-  # 3) Odvodené premenné (používajú inp_* a payload premenné)
-  has_matching_object: >-
-    {% set ns = namespace(found=0) %}
-    {% for o in (objects_list or []) %}
-      {% if o in inp_object_labels %}{% set ns.found = 1 %}{% endif %}
-    {% endfor %}
-    {{ ns.found }}
-  label_display: "{{ (objects_list or []) | join(', ') | default('') }}"
+  # 3) Odvodené premenné
+  has_matching_object: "{{ (1 if label in inp_object_labels else 0) }}"
+  label_display: "{{ label }}"
   title_rendered: "{{ inp_notification_title | replace('{{ camera_name }}', camera_name) | replace('{{ label }}', label_display) }}"
   message_rendered: "{{ inp_message_template | replace('{{ camera_name }}', camera_name) | replace('{{ label }}', label_display) }}"
   image_url: >-
-    {% if event_id %}
+    {% if event_id and (has_snapshot | int) == 1 %}
       {% set base = (inp_home_assistant_url or '') | trim %}
       {% set base = base[:-1] if base.endswith('/') else base %}
-      {% if base %}
-        {{ base }}/api/frigate/notifications/{{ event_id }}/{{ inp_image_type }}.jpg
-      {% else %}
-        /api/frigate/notifications/{{ event_id }}/{{ inp_image_type }}.jpg
-      {% endif %}
+      {{ (base + '/api/frigate/notifications/' + event_id + '/' + inp_image_type + '.jpg') if base else ('/api/frigate/notifications/' + event_id + '/' + inp_image_type + '.jpg') }}
     {% else %}
       ''
     {% endif %}
@@ -190,7 +172,7 @@ condition:
   - condition: template
     value_template: "{{ event_type == inp_event_type_filter }}"
   - condition: template
-    value_template: "{{ inp_zone_filter == '' or (zones_list is iterable and zones_list is not string and inp_zone_filter in zones_list) }}"
+    value_template: "{{ inp_zone_filter == '' or (inp_zone_filter in (zones_list or []) or inp_zone_filter in (entered_zones_list or [])) }}"
   - condition: template
     value_template: "{{ (inp_severity_filter | default('any')) == 'any' or severity == inp_severity_filter }}"
 
@@ -212,7 +194,7 @@ action:
                       data:
                         image: "{{ image_url }}"
                         clickAction: "{{ inp_click_action | trim }}"
-                        tag: "frigate-review-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+                        tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
               - conditions:
                   - condition: template
                     value_template: "{{ (inp_click_action | default('') | trim) == '' }}"
@@ -223,7 +205,7 @@ action:
                       message: "{{ message_rendered }}"
                       data:
                         image: "{{ image_url }}"
-                        tag: "frigate-review-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+                        tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
       - conditions:
           - condition: template
             value_template: "{{ image_url == '' }}"
@@ -239,7 +221,7 @@ action:
                       message: "{{ message_rendered }}"
                       data:
                         clickAction: "{{ inp_click_action | trim }}"
-                        tag: "frigate-review-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+                        tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
               - conditions:
                   - condition: template
                     value_template: "{{ (inp_click_action | default('') | trim) == '' }}"
@@ -249,7 +231,7 @@ action:
                       title: "{{ title_rendered }}"
                       message: "{{ message_rendered }}"
                       data:
-                        tag: "frigate-review-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+                        tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
   - if:
       - condition: template
         value_template: "{{ (inp_cooldown_seconds | int) > 0 }}"
