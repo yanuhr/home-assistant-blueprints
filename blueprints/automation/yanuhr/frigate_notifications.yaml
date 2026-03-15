@@ -1,0 +1,203 @@
+blueprint:
+  name: Frigate – mobilné notifikácie (eventy)
+  description: >
+    Posiela push notifikácie do mobilnej aplikácie pri detekcii objektov z Frigate.
+    Reaguje na MQTT eventy z Frigate (frigate/events), filtruje podľa kamery, labelu a voliteľne zóny.
+    Podporuje obrázok (thumbnail/snapshot) cez HA Frigate endpoint a cooldown po odoslaní.
+    Vhodné pre lokálne nasadenie, kde Frigate slúži na detekciu a snapshoty, nie ako NVR.
+  domain: automation
+
+  input:
+    frigate_camera_name:
+      name: Názov kamery vo Frigate
+      description: Presný názov kamery podľa Frigate config (napr. ulicka, predna_dver).
+      selector:
+        text: {}
+
+    notify_service:
+      name: Notify služba
+      description: Služba pre push notifikáciu (napr. notify.mobile_app_jan).
+      selector:
+        text: {}
+
+    object_labels:
+      name: Objekty spúšťajúce notifikáciu
+      description: Zoznam labelov objektov, pri ktorých sa má poslať notifikácia.
+      default:
+        - person
+        - car
+      selector:
+        select:
+          options:
+            - person
+            - car
+            - dog
+            - cat
+            - bird
+            - bicycle
+            - motorcycle
+            - bus
+            - truck
+          multiple: true
+
+    notification_title:
+      name: Titulok notifikácie
+      description: >
+        Titulok notifikácie. Placeholdery (budú nahradené): {{ camera_name }}, {{ label }}.
+        Nie je to Jinja šablóna – len tieto dva reťazce sa dosadia.
+      default: "Frigate: {{ camera_name }}"
+      selector:
+        text: {}
+
+    message_template:
+      name: Text správy
+      description: >
+        Text správy. Placeholdery (budú nahradené): {{ camera_name }}, {{ label }}.
+        Nie je to Jinja šablóna – len tieto dva reťazce sa dosadia.
+        Príklad: "Detekované: {{ label }} ({{ camera_name }})"
+      default: "Detekované: {{ label }} ({{ camera_name }})"
+      selector:
+        text: {}
+
+    cooldown_seconds:
+      name: Cooldown (sekúnd)
+      description: Po odoslaní notifikácie sa ďalšia neodošle skôr ako po tejto dobe (obmedzenie spamu).
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 600
+          step: 5
+
+    zone_filter:
+      name: Zóna (voliteľné)
+      description: Ak je vyplnené, notifikácia sa odošle iba ak objekt vstúpil do tejto zóny.
+      default: ""
+      selector:
+        text: {}
+
+    image_type:
+      name: Typ obrázka
+      description: Thumbnail je menší, snapshot je väčší snímok. Obrázok cez HA endpoint /api/frigate/notifications/...
+      default: snapshot
+      selector:
+        select:
+          options:
+            - thumbnail
+            - snapshot
+
+    home_assistant_url:
+      name: Home Assistant URL (pre obrázok)
+      description: >
+        Základná URL Home Assistant (bez lomítka na konci). Potrebná, aby mobil mohol stiahnuť obrázok.
+        Napr. https://ha.domena.sk:8123. Ak prázdne, použije sa relatívna cesta (môže nefungovať na mobile).
+      default: ""
+      selector:
+        text: {}
+
+    event_type_filter:
+      name: Typ eventu
+      description: "new" = hneď pri detekcii (môže byť viac notifikácií), "end" = až po skončení (jedna na udalosť).
+      default: end
+      selector:
+        select:
+          options:
+            - end
+            - new
+
+    click_action:
+      name: Klik – URL (voliteľné)
+      description: URL alebo lovelace path po kliknutí na notifikáciu (napr. /lovelace/cameras).
+      default: ""
+      selector:
+        text: {}
+
+trigger:
+  - platform: mqtt
+    topic: frigate/events
+
+variables:
+  # MQTT payload – JSON string sa parsuje cez from_json, už zparsovaný dict sa použije ako je
+  event_data: "{{ (trigger.payload if trigger.payload is mapping else (trigger.payload or '{}') | from_json(default={})) | default({}) }}"
+  # after môže chýbať; ak nie je mapping, používame celý event_data
+  after_data: "{{ (event_data.get('after') if event_data.get('after') is mapping else event_data) | default(event_data) }}"
+  # Polia z after_data alebo event_data, vždy string alebo ''
+  camera_name: "{{ (after_data.get('camera') or event_data.get('camera') or '') | string }}"
+  label: "{{ (after_data.get('label') or event_data.get('label') or '') | string }}"
+  event_type: "{{ (event_data.get('type') or event_data.get('event_type') or '') | string }}"
+  event_id: "{{ (after_data.get('id') or event_data.get('id') or '') | string }}"
+  # entered_zones: list ak existuje a je iterable (nie string), inak prázdny zoznam
+  entered_zones: "{{ (after_data.get('entered_zones') if (after_data is mapping and after_data.get('entered_zones') is iterable and after_data.get('entered_zones') is not string) else []) | default([]) }}"
+
+  # Mapovanie inputov cez !input – hodnoty sa dosadia pri vytvorení automácie z blueprintu
+  inp_camera_name: !input frigate_camera_name
+  inp_notify_service: !input notify_service
+  inp_object_labels: !input object_labels
+  inp_notification_title: !input notification_title
+  inp_message_template: !input message_template
+  inp_cooldown_seconds: !input cooldown_seconds
+  inp_zone_filter: !input zone_filter
+  inp_image_type: !input image_type
+  inp_click_action: !input click_action
+  inp_event_type_filter: !input event_type_filter
+  inp_home_assistant_url: !input home_assistant_url
+
+  # Odvodené – title, message, image URL (HA Frigate notification endpoint)
+  title_rendered: "{{ inp_notification_title | replace('{{ camera_name }}', camera_name) | replace('{{ label }}', label) }}"
+  message_rendered: "{{ inp_message_template | replace('{{ camera_name }}', camera_name) | replace('{{ label }}', label) }}"
+  image_url: >-
+    {% if event_id %}
+      {% set base = (inp_home_assistant_url or '') | trim %}
+      {% set base = base[:-1] if base.endswith('/') else base %}
+      {% if base %}
+        {{ base }}/api/frigate/notifications/{{ event_id }}/{{ inp_image_type }}.jpg
+      {% else %}
+        /api/frigate/notifications/{{ event_id }}/{{ inp_image_type }}.jpg
+      {% endif %}
+    {% else %}
+      ''
+    {% endif %}
+
+condition:
+  - condition: template
+    value_template: "{{ camera_name == inp_camera_name }}"
+  - condition: template
+    value_template: "{{ label in inp_object_labels }}"
+  - condition: template
+    value_template: "{{ event_type == inp_event_type_filter }}"
+  - condition: template
+    value_template: "{{ inp_zone_filter == '' or (entered_zones is iterable and entered_zones is not string and inp_zone_filter in entered_zones) }}"
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ image_url != '' }}"
+        sequence:
+          - service: "{{ inp_notify_service }}"
+            data:
+              title: "{{ title_rendered }}"
+              message: "{{ message_rendered }}"
+              data:
+                image: "{{ image_url }}"
+                clickAction: "{{ inp_click_action if inp_click_action != '' else none }}"
+                tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ image_url == '' }}"
+        sequence:
+          - service: "{{ inp_notify_service }}"
+            data:
+              title: "{{ title_rendered }}"
+              message: "{{ message_rendered }}"
+              data:
+                clickAction: "{{ inp_click_action if inp_click_action != '' else none }}"
+                tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+  - if:
+      - condition: template
+        value_template: "{{ (inp_cooldown_seconds | int) > 0 }}"
+    then:
+      - delay:
+          seconds: "{{ inp_cooldown_seconds | int }}"
+
+mode: single
