@@ -91,7 +91,7 @@ blueprint:
     event_type_filter:
       name: Typ eventu
       description: >
-        "end" = jedna notifikácia po skončení. "new" = hneď pri detekcii.
+        end = jedna notifikácia po skončení, new = hneď pri detekcii.
       default: end
       selector:
         select:
@@ -102,7 +102,7 @@ blueprint:
     severity_filter:
       name: Severity (voliteľné)
       description: >
-        Notifikácia len keď after.max_severity sedí. "any" = bez filtra.
+        Notifikácia len keď after.max_severity sedí. any = bez filtra.
       default: any
       selector:
         select:
