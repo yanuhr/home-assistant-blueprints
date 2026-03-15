@@ -113,10 +113,24 @@ blueprint:
 
     click_action:
       name: Klik – URL (voliteľné)
-      description: URL alebo lovelace path po kliknutí na notifikáciu.
+      description: Pri režime custom_click_action sa použije táto URL po kliknutí.
       default: ""
       selector:
         text: {}
+
+    click_behavior:
+      name: Správanie po kliknutí
+      description: >
+        open_image = otvorí obrázok snapshotu (Android clickAction, iOS url).
+        custom_click_action = použije pole Klik – URL vyššie.
+        no_action = žiadna akcia po kliknutí.
+      default: open_image
+      selector:
+        select:
+          options:
+            - open_image
+            - custom_click_action
+            - no_action
 
 trigger:
   - platform: mqtt
@@ -148,6 +162,7 @@ variables:
   inp_zone_filter: !input zone_filter
   inp_image_type: !input image_type
   inp_click_action: !input click_action
+  inp_click_behavior: !input click_behavior
   inp_event_type_filter: !input event_type_filter
   inp_severity_filter: !input severity_filter
   inp_home_assistant_url: !input home_assistant_url
@@ -165,6 +180,7 @@ variables:
     {% else %}
       ''
     {% endif %}
+  resolved_click_url: "{{ (image_url if inp_click_behavior == 'open_image' else (inp_click_action | default('') | trim)) if (inp_click_behavior == 'open_image' and image_url != '') or (inp_click_behavior == 'custom_click_action' and (inp_click_action | default('') | trim) != '') else '' }}"
 
 condition:
   - condition: template
@@ -182,58 +198,50 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ image_url != '' }}"
+            value_template: "{{ image_url != '' and (resolved_click_url | trim) != '' }}"
         sequence:
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ (inp_click_action | default('') | trim) != '' }}"
-                sequence:
-                  - service: "{{ inp_notify_service | string }}"
-                    data:
-                      title: "{{ title_rendered }}"
-                      message: "{{ message_rendered }}"
-                      data:
-                        image: "{{ image_url }}"
-                        clickAction: "{{ inp_click_action | trim }}"
-                        tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
-              - conditions:
-                  - condition: template
-                    value_template: "{{ (inp_click_action | default('') | trim) == '' }}"
-                sequence:
-                  - service: "{{ inp_notify_service | string }}"
-                    data:
-                      title: "{{ title_rendered }}"
-                      message: "{{ message_rendered }}"
-                      data:
-                        image: "{{ image_url }}"
-                        tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+          - service: "{{ inp_notify_service | string }}"
+            data:
+              title: "{{ title_rendered }}"
+              message: "{{ message_rendered }}"
+              data:
+                image: "{{ image_url }}"
+                clickAction: "{{ resolved_click_url }}"
+                url: "{{ resolved_click_url }}"
+                tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
       - conditions:
           - condition: template
-            value_template: "{{ image_url == '' }}"
+            value_template: "{{ image_url != '' and (resolved_click_url | trim) == '' }}"
         sequence:
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ (inp_click_action | default('') | trim) != '' }}"
-                sequence:
-                  - service: "{{ inp_notify_service | string }}"
-                    data:
-                      title: "{{ title_rendered }}"
-                      message: "{{ message_rendered }}"
-                      data:
-                        clickAction: "{{ inp_click_action | trim }}"
-                        tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
-              - conditions:
-                  - condition: template
-                    value_template: "{{ (inp_click_action | default('') | trim) == '' }}"
-                sequence:
-                  - service: "{{ inp_notify_service | string }}"
-                    data:
-                      title: "{{ title_rendered }}"
-                      message: "{{ message_rendered }}"
-                      data:
-                        tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+          - service: "{{ inp_notify_service | string }}"
+            data:
+              title: "{{ title_rendered }}"
+              message: "{{ message_rendered }}"
+              data:
+                image: "{{ image_url }}"
+                tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ image_url == '' and (resolved_click_url | trim) != '' }}"
+        sequence:
+          - service: "{{ inp_notify_service | string }}"
+            data:
+              title: "{{ title_rendered }}"
+              message: "{{ message_rendered }}"
+              data:
+                clickAction: "{{ resolved_click_url }}"
+                url: "{{ resolved_click_url }}"
+                tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ image_url == '' and (resolved_click_url | trim) == '' }}"
+        sequence:
+          - service: "{{ inp_notify_service | string }}"
+            data:
+              title: "{{ title_rendered }}"
+              message: "{{ message_rendered }}"
+              data:
+                tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
   - if:
       - condition: template
         value_template: "{{ (inp_cooldown_seconds | int) > 0 }}"
