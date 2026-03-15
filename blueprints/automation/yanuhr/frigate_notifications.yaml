@@ -97,7 +97,8 @@ blueprint:
 
     event_type_filter:
       name: Typ eventu
-      description: "new" = hneď pri detekcii (môže byť viac notifikácií), "end" = až po skončení (jedna na udalosť).
+      description: >
+        "new" = hneď pri detekcii (môže byť viac notifikácií), "end" = až po skončení (jedna na udalosť).
       default: end
       selector:
         select:
@@ -118,7 +119,8 @@ trigger:
 
 variables:
   # MQTT payload – JSON string sa parsuje cez from_json, už zparsovaný dict sa použije ako je
-  event_data: "{{ (trigger.payload if trigger.payload is mapping else (trigger.payload or '{}') | from_json(default={})) | default({}) }}"
+  event_data: >-
+    {{ (trigger.payload if trigger.payload is mapping else (trigger.payload or '{}') | from_json(default={})) | default({}) }}
   # after môže chýbať; ak nie je mapping, používame celý event_data
   after_data: "{{ (event_data.get('after') if event_data.get('after') is mapping else event_data) | default(event_data) }}"
   # Polia z after_data alebo event_data, vždy string alebo ''
@@ -174,24 +176,24 @@ action:
           - condition: template
             value_template: "{{ image_url != '' }}"
         sequence:
-          - service: "{{ inp_notify_service }}"
+          - service: "{{ inp_notify_service | string }}"
             data:
               title: "{{ title_rendered }}"
               message: "{{ message_rendered }}"
               data:
                 image: "{{ image_url }}"
-                clickAction: "{{ inp_click_action if inp_click_action != '' else none }}"
+                clickAction: "{{ inp_click_action | default('') }}"
                 tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
       - conditions:
           - condition: template
             value_template: "{{ image_url == '' }}"
         sequence:
-          - service: "{{ inp_notify_service }}"
+          - service: "{{ inp_notify_service | string }}"
             data:
               title: "{{ title_rendered }}"
               message: "{{ message_rendered }}"
               data:
-                clickAction: "{{ inp_click_action if inp_click_action != '' else none }}"
+                clickAction: "{{ inp_click_action | default('') }}"
                 tag: "frigate-{{ inp_camera_name }}-{{ inp_cooldown_seconds }}"
   - if:
       - condition: template
