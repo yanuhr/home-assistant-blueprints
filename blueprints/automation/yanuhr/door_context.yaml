@@ -1,0 +1,434 @@
+# Door context blueprint V1 — production-ready
+# Architektúra: docs/door_context_blueprint_architecture.md
+# Výstup: event door_context.evaluated (primárny); notify voliteľný, per event_type.
+# Rozhodovanie: snapshot pri open (štart cyklu) + stav pri close (ukončenie) pre arrival/visitor/departure.
+
+blueprint:
+  name: Kontextové vyhodnocovanie vchodových dverí (V1)
+  description: >
+    Jeden door cycle (otvorenie → zatvorenie) klasifikuje na arrival, departure, visitor,
+    unexpected_open alebo door_cycle_only. Event + voliteľné notify s prepínačmi per typ.
+  domain: automation
+
+  input:
+    door_contact:
+      name: Senzor dverí
+      description: Binary sensor vchodových dverí (open = otvorené). Jediný povinný vstup.
+      selector:
+        entity:
+          domain: binary_sensor
+
+    lock_entity:
+      name: Smart zámok
+      description: Lock – odomknutie podporuje arrival, zamknutie departure. Voliteľné.
+      default: ""
+      selector:
+        entity:
+          domain: lock
+          multiple: false
+
+    camera_person_entity:
+      name: Detekcia osoby pri dverách
+      description: Binary sensor (napr. Frigate). Podporuje visitor a arrival (v páre s lock/hallway). Voliteľné.
+      default: ""
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: false
+
+    hallway_entity:
+      name: Prítomnosť v chodbe
+      description: Presence v chodbe. On = podpora arrival, off = visitor/departure. Voliteľné.
+      default: ""
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: false
+
+    person_entities:
+      name: Osoby domácnosti
+      description: Person entity pre all_away / anyone_home. Prázdne = anyone_home=true, all_away=false (konzervatívny fallback).
+      default: []
+      selector:
+        entity:
+          domain: person
+          multiple: true
+
+    alarm_entity:
+      name: Alarm
+      description: Armed = otvorenie sa môže klasifikovať ako unexpected_open. Voliteľné.
+      default: ""
+      selector:
+        entity:
+          domain: alarm_control_panel
+          multiple: false
+
+    night_mode_entity:
+      name: Nočný režim
+      description: Boolean/sensor – is_night v payloade eventu. Voliteľné.
+      default: ""
+      selector:
+        entity:
+          multiple: false
+
+    notify_service:
+      name: Notify služba
+      description: Služba pre notifikácie (napr. notify.mobile_app_*). Prázdne = len event, žiadna notifikácia.
+      default: ""
+      selector:
+        text: {}
+
+    notify_arrival:
+      name: Notifikovať arrival
+      description: Poslať notify pri klasifikácii príchodu.
+      default: true
+      selector:
+        boolean: {}
+    notify_departure:
+      name: Notifikovať departure
+      description: Poslať notify pri klasifikácii odchodu.
+      default: true
+      selector:
+        boolean: {}
+    notify_visitor:
+      name: Notifikovať visitor
+      description: Poslať notify pri osobe pri dverách.
+      default: true
+      selector:
+        boolean: {}
+    notify_unexpected_open:
+      name: Notifikovať unexpected_open
+      description: Poslať notify pri neočakávanom otvorení.
+      default: true
+      selector:
+        boolean: {}
+    notify_door_cycle_only:
+      name: Notifikovať door_cycle_only
+      description: Notifikovať bežnú aktivitu (default vypnuté – menej notifikácií).
+      default: false
+      selector:
+        boolean: {}
+
+    debug_mode:
+      name: Debug režim
+      description: Zobraziť stav a dôvod klasifikácie v persistent notification.
+      default: false
+      selector:
+        boolean: {}
+
+    unexpected_open_ignore_if_anyone_home:
+      name: Ignorovať unexpected_open ak niekto doma
+      description: Pri anyone_home=true neklasifikovať ako unexpected_open.
+      default: true
+      selector:
+        boolean: {}
+
+    debounce_seconds:
+      name: Debounce (s)
+      description: Otvorenie kratšie než X s sa ignoruje (glitch filter).
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+
+    open_too_long_seconds:
+      name: Limit „otvorené príliš dlho“ (s)
+      description: Po prekročení sa v payloade nastaví open_too_long=true.
+      default: 300
+      selector:
+        number:
+          min: 60
+          max: 900
+          step: 30
+
+    cycle_timeout_minutes:
+      name: Timeout cyklu (min)
+      description: Max. čakanie na zatvorenie; potom sa cyklus ukončí (cycle_timed_out=true).
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 60
+          step: 1
+
+    cooldown_seconds:
+      name: Cooldown po vyhodnotení (s)
+      description: Po vyhodnotení X s žiadny nový trigger (anti-spam). 0 = vypnuté.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 5
+
+trigger:
+  - platform: state
+    entity_id: !input door_contact
+    from: "off"
+    to: "on"
+
+variables:
+  door_entity_id: "{{ trigger.entity_id }}"
+  opened_at: "{{ trigger.to_state.last_updated }}"
+
+action:
+  - variables:
+      inp_lock: !input lock_entity
+      inp_cam: !input camera_person_entity
+      inp_hall: !input hallway_entity
+      inp_alarm: !input alarm_entity
+      inp_night: !input night_mode_entity
+      inp_persons: !input person_entities
+      inp_notify: !input notify_service
+      inp_notify_arrival: !input notify_arrival
+      inp_notify_departure: !input notify_departure
+      inp_notify_visitor: !input notify_visitor
+      inp_notify_unexpected_open: !input notify_unexpected_open
+      inp_notify_door_cycle_only: !input notify_door_cycle_only
+      inp_debug: !input debug_mode
+      inp_ignore_unexpected: !input unexpected_open_ignore_if_anyone_home
+      inp_debounce: !input debounce_seconds
+      inp_open_too_long_sec: !input open_too_long_seconds
+      inp_cycle_timeout_min: !input cycle_timeout_minutes
+      inp_cooldown: !input cooldown_seconds
+
+      persons_list: "{{ inp_persons if inp_persons is iterable and inp_persons is not string else [] }}"
+      persons_configured: "{{ persons_list | length > 0 }}"
+      open_lock_unlocked: "{{ inp_lock != '' and inp_lock != 'none' and states(inp_lock) == 'unlocked' }}"
+      open_lock_locked: "{{ inp_lock != '' and inp_lock != 'none' and states(inp_lock) == 'locked' }}"
+      open_hallway_on: "{{ inp_hall != '' and inp_hall != 'none' and states(inp_hall) == 'on' }}"
+      open_person_detected: "{{ inp_cam != '' and inp_cam != 'none' and states(inp_cam) == 'on' }}"
+
+  - delay:
+      seconds: "{{ inp_debounce }}"
+
+  - condition: state
+    entity_id: !input door_contact
+    state: "on"
+
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input door_contact
+        to: "off"
+    timeout:
+      minutes: "{{ inp_cycle_timeout_min }}"
+
+  - variables:
+      door_entity: "{{ door_entity_id }}"
+      closed_at: >-
+        {% if wait.trigger is not none and wait.trigger.to_state is defined %}
+          {{ wait.trigger.to_state.last_updated }}
+        {% else %}
+          {{ now() }}
+        {% endif %}
+      closed_at_str: "{{ closed_at | as_timestamp | timestamp_custom('%Y-%m-%dT%H:%M:%S', true) }}"
+      cycle_timed_out: "{{ wait.trigger is none }}"
+
+  - variables:
+      opened_at_str: "{{ opened_at | as_timestamp | timestamp_custom('%Y-%m-%dT%H:%M:%S', true) }}"
+      ts_open: "{{ as_timestamp(opened_at) }}"
+      ts_close: "{{ as_timestamp(closed_at) }}"
+      dwell_seconds: "{{ (ts_close - ts_open) | int }}"
+
+      is_armed: >-
+        {% if inp_alarm != '' and inp_alarm != 'none' %}
+          {{ states(inp_alarm) in ['armed_away', 'armed_home', 'armed_night', 'armed_vacation', 'armed_custom_bypass'] or states(inp_alarm) == 'on' }}
+        {% else %}
+          false
+        {% endif %}
+      is_night: >-
+        {% if inp_night != '' and inp_night != 'none' %}
+          {{ states(inp_night) in ['on', 'true'] }}
+        {% else %}
+          false
+        {% endif %}
+
+      anyone_home: >-
+        {% if persons_configured %}
+          {% set ns = namespace(found=false) %}
+          {% for e in persons_list %}
+            {% if states(e) == 'home' %}{% set ns.found = true %}{% endif %}
+          {% endfor %}
+          {{ ns.found }}
+        {% else %}
+          true
+        {% endif %}
+      all_away: >-
+        {% if persons_configured %}
+          {% set ns = namespace(found=true) %}
+          {% for e in persons_list %}
+            {% if states(e) == 'home' %}{% set ns.found = false %}{% endif %}
+          {% endfor %}
+          {{ ns.found }}
+        {% else %}
+          false
+        {% endif %}
+
+      lock_unlocked_now: "{{ inp_lock != '' and inp_lock != 'none' and states(inp_lock) == 'unlocked' }}"
+      lock_locked_now: "{{ inp_lock != '' and inp_lock != 'none' and states(inp_lock) == 'locked' }}"
+      hallway_configured: "{{ inp_hall != '' and inp_hall != 'none' }}"
+      hallway_on: "{{ hallway_configured and states(inp_hall) == 'on' }}"
+      camera_configured: "{{ inp_cam != '' and inp_cam != 'none' }}"
+      person_detected: "{{ camera_configured and states(inp_cam) == 'on' }}"
+
+      lock_support: "{{ open_lock_unlocked or lock_unlocked_now }}"
+      hallway_entered: "{{ hallway_configured and (not open_hallway_on) and hallway_on }}"
+      hallway_support: "{{ hallway_on or hallway_entered }}"
+      arrival_count: "{{ (1 if lock_support else 0) + (1 if hallway_support else 0) + (1 if person_detected else 0) }}"
+      arrival_ok: "{{ (arrival_count | int >= 2) and (not cycle_timed_out) and (lock_support or hallway_support) }}"
+      departure_ok: "{{ persons_configured and lock_locked_now and all_away and (not hallway_on) and (not cycle_timed_out) }}"
+
+      ignore_unexpected: "{{ inp_ignore_unexpected }}"
+      unexpected_cond: "{{ (is_armed or all_away) and (not ignore_unexpected or not anyone_home) }}"
+      visitor_hallway_off: "{{ (person_detected or open_person_detected) and hallway_configured and (not hallway_on) }}"
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ unexpected_cond }}"
+        sequence:
+          - variables:
+              event_type: "unexpected_open"
+              reason: "armed alebo all_away, kontext nečakaný"
+              used_signals: "is_armed,all_away"
+      - conditions:
+          - condition: template
+            value_template: "{{ visitor_hallway_off }}"
+        sequence:
+          - variables:
+              event_type: "visitor"
+              reason: "person pri dverách, hallway off = nevstúpil do chodby"
+              used_signals: "camera,hallway_off"
+      - conditions:
+          - condition: template
+            value_template: "{{ arrival_ok }}"
+        sequence:
+          - variables:
+              event_type: "arrival"
+              reason: "camera+lock alebo camera+hallway alebo lock+hallway podporujú príchod (camera nikdy sama)"
+              used_signals: "lock,hallway,camera"
+      - conditions:
+          - condition: template
+            value_template: "{{ departure_ok }}"
+        sequence:
+          - variables:
+              event_type: "departure"
+              reason: "persons zadané, lock locked, all_away, hallway off (podmienka departure)"
+              used_signals: "lock,persons,away,hallway_off"
+      - conditions:
+          - condition: template
+            value_template: "{{ person_detected or open_person_detected }}"
+        sequence:
+          - variables:
+              event_type: "visitor"
+              reason: "kamera detegovala osobu (open alebo close), arrival nepotvrdený (lock/hallway)"
+              used_signals: "camera"
+      - conditions:
+          - condition: template
+            value_template: "true"
+        sequence:
+          - variables:
+              event_type: "door_cycle_only"
+              reason: "fallback, žiadny dostatočný signál"
+              used_signals: ""
+
+  - variables:
+      open_too_long: "{{ dwell_seconds | int >= inp_open_too_long_sec }}"
+      reason_suffix: >-
+        {% set ns = namespace(s='') %}
+        {% if not persons_configured %}{% set ns.s = ns.s + ' (persons_not_configured)' %}{% endif -%}
+        {% if event_type == 'visitor' and hallway_configured and not hallway_on and 'hallway off' not in reason %}{% set ns.s = ns.s + ' (hallway off)' %}{% endif -%}
+        {% if event_type == 'unexpected_open' and (person_detected or open_person_detected) %}{% set ns.s = ns.s + ' (osoba pri dverách)' %}{% endif -%}
+        {% if event_type == 'unexpected_open' and camera_configured and not (person_detected or open_person_detected) %}{% set ns.s = ns.s + ' (žiadna osoba pri dverách)' %}{% endif -%}
+        {{- ns.s }}
+      reason_full: "{{ reason + reason_suffix }}"
+      user_message: >-
+        {% set ns = namespace(msg='') %}
+        {% if event_type == 'arrival' %}{% set ns.msg = 'Príchod cez vchodové dvere' %}
+        {% elif event_type == 'departure' %}{% set ns.msg = 'Odchod cez vchodové dvere' %}
+        {% elif event_type == 'visitor' %}{% set ns.msg = 'Osoba pri vchodových dverách' %}
+        {% elif event_type == 'unexpected_open' %}{% set ns.msg = 'Neočakávané otvorenie vchodových dverí' %}
+        {% elif event_type == 'door_cycle_only' %}{% set ns.msg = 'Aktivita na vchodových dverách' %}
+        {% else %}{% set ns.msg = event_type %}{% endif -%}
+        {{- ns.msg }}
+      open_too_long_suffix: "{{ ' Dvere ostali otvorené príliš dlho.' if open_too_long else '' }}"
+      notify_message: "{{ user_message }}{{ open_too_long_suffix }}"
+      notify_this_event: "{{ (event_type == 'arrival' and inp_notify_arrival) or (event_type == 'departure' and inp_notify_departure) or (event_type == 'visitor' and inp_notify_visitor) or (event_type == 'unexpected_open' and inp_notify_unexpected_open) or (event_type == 'door_cycle_only' and inp_notify_door_cycle_only) }}"
+      camera_role: >-
+        {% if not camera_configured %}not_configured
+        {% elif event_type == 'arrival' and (person_detected or open_person_detected) %}arrival_support
+        {% elif event_type == 'visitor' and (person_detected or open_person_detected) %}visitor_support
+        {% elif event_type == 'unexpected_open' and (person_detected or open_person_detected) %}unexpected_open_context
+        {% elif event_type == 'unexpected_open' and camera_configured and not (person_detected or open_person_detected) %}unexpected_open_no_person
+        {% else %}ignored{% endif %}
+      hallway_role: >-
+        {% if not hallway_configured %}not_configured
+        {% elif event_type == 'arrival' and hallway_on %}arrival_support
+        {% elif event_type == 'visitor' and not hallway_on %}visitor_support
+        {% elif event_type == 'departure' and not hallway_on %}departure_support
+        {% elif hallway_configured and hallway_on and persons_configured and lock_locked_now and all_away %}departure_blocked
+        {% else %}ignored{% endif %}
+
+  - event: door_context.evaluated
+    event_data:
+      event_type: "{{ event_type }}"
+      door_entity: "{{ door_entity }}"
+      opened_at: "{{ opened_at_str }}"
+      closed_at: "{{ closed_at_str }}"
+      is_night: "{{ is_night }}"
+      is_armed: "{{ is_armed }}"
+      all_away: "{{ all_away }}"
+      anyone_home: "{{ anyone_home }}"
+      persons_configured: "{{ persons_configured }}"
+      camera_configured: "{{ camera_configured }}"
+      person_detected: "{{ person_detected }}"
+      camera_role: "{{ camera_role }}"
+      hallway_configured: "{{ hallway_configured }}"
+      hallway_on: "{{ hallway_on }}"
+      hallway_role: "{{ hallway_role }}"
+      open_too_long: "{{ open_too_long }}"
+      reason: "{{ reason_full }}"
+      user_message: "{{ user_message }}"
+      used_signals: "{{ used_signals }}"
+      cycle_timed_out: "{{ cycle_timed_out }}"
+      open_lock_unlocked: "{{ open_lock_unlocked }}"
+      open_hallway_on: "{{ open_hallway_on }}"
+      open_person_detected: "{{ open_person_detected }}"
+
+  - if:
+      - condition: template
+        value_template: "{{ inp_notify != '' and notify_this_event }}"
+    then:
+      - service: "{{ inp_notify }}"
+        data:
+          title: "Vchodové dvere"
+          message: "{{ notify_message }}"
+
+  - if:
+      - condition: template
+        value_template: "{{ inp_debug }}"
+    then:
+      - service: persistent_notification.create
+        data:
+          title: "Door context (debug)"
+          message: >-
+            event={{ event_type }} | opened={{ opened_at_str }} closed={{ closed_at_str }} dwell={{ dwell_seconds }}s
+            night={{ is_night }} armed={{ is_armed }} away={{ all_away }} home={{ anyone_home }} persons_configured={{ persons_configured }}
+            at_open: lock_unlocked={{ open_lock_unlocked }} lock_locked={{ open_lock_locked }} hallway_on={{ open_hallway_on }} person_detected={{ open_person_detected }}
+            at_close: lock_unlocked={{ lock_unlocked_now }} lock_locked={{ lock_locked_now }} hallway_on={{ hallway_on }} person_detected={{ person_detected }}
+            lock_support={{ lock_support }} hallway_support={{ hallway_support }} hallway_entered={{ hallway_entered }} camera_role={{ camera_role }} hallway_role={{ hallway_role }}
+            arrival_count={{ arrival_count }} signals={{ used_signals }} open_too_long={{ open_too_long }} cycle_timed_out={{ cycle_timed_out }}
+            reason={{ reason_full }}
+            notify_message={{ notify_message }} notify_sent={{ inp_notify != '' and notify_this_event }}
+
+  - if:
+      - condition: template
+        value_template: "{{ inp_cooldown | int > 0 }}"
+    then:
+      - delay:
+          seconds: "{{ inp_cooldown | int }}"
+
+# mode single: počas behu (vrátane cooldown delay) sa ďalší trigger nespracuje
+mode: single

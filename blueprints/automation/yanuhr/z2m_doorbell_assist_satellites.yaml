@@ -1,0 +1,148 @@
+# Version: 1.0.0
+# Zigbee2MQTT Doorbell to Assist Satellites
+#
+# Design notes:
+# - Zigbee2MQTT button presses are discovered as MQTT device triggers (not entity
+#   state changes). A blueprint trigger selector lets the user pick that exact
+#   Device trigger in the UI — the currently recommended Z2M approach.
+# - mode: single drops presses that arrive while a chime is still playing, which
+#   prevents queued/stale chimes and accidental duplicate Zigbee events without
+#   locking out a legitimate press after the previous run finishes.
+# - preannounce is forced off so the configured ding-dong plays exactly once.
+
+blueprint:
+  name: Zigbee2MQTT Doorbell to Assist Satellites
+  author: yanuhr
+  description: >
+    Turns a Zigbee2MQTT button into a whole-home doorbell.
+
+    When the configured button action occurs, a ding-dong sound is announced on
+    every selected Assist Satellite at once — including Home Assistant Voice
+    Preview Edition devices that expose an `assist_satellite` entity.
+
+    Setup tip: press the physical Zigbee button at least once before configuring
+    the automation so Zigbee2MQTT can discover its MQTT device actions in Home
+    Assistant. This blueprint does not use Zigbee2MQTT legacy action sensors.
+  domain: automation
+  homeassistant:
+    # Built-in local chime URL and media_id announce support.
+    min_version: "2025.4.0"
+  input:
+    doorbell_button:
+      name: Doorbell Button
+      icon: mdi:doorbell
+      description: >
+        Prefer an MQTT **Device** trigger for your Zigbee2MQTT button and the
+        action that should ring the doorbell (often named something like
+        `single`, `press`, or `click` — use the exact action your device exposes).
+
+        If the Device trigger is not available, add an MQTT trigger instead:
+        topic `zigbee2mqtt/<friendly_name>`, and match only the doorbell action
+        payload / `action` value. Do not trigger on battery, linkquality, or
+        empty action updates.
+      input:
+        doorbell_trigger:
+          name: Doorbell button trigger
+          description: >
+            Add one trigger for the doorbell press. Recommended: Device → your
+            Zigbee2MQTT button → the single-press action. Press the physical
+            button once first if no actions appear yet.
+          selector:
+            trigger:
+
+    chime_speakers:
+      name: Chime Speakers
+      icon: mdi:speaker-multiple
+      description: >
+        Assist Satellites that should play the doorbell. All selected entities
+        are targeted in a single announcement action for near-simultaneous start.
+      input:
+        assist_satellites:
+          name: Assist Satellites
+          description: >
+            Select one or more `assist_satellite` entities (for example Home
+            Assistant Voice Preview Edition devices). Unrelated media players
+            are not listed.
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: assist_satellite
+
+    doorbell_sound:
+      name: Doorbell Sound
+      icon: mdi:music-note
+      description: >
+        The audio played as the doorbell. The default uses Home Assistant's
+        built-in local Assist Satellite chime so the doorbell works offline.
+
+        To use your own ding-dong, place an audio file in the Home Assistant
+        media folder (for example `/media/doorbell.mp3`) and select it here, or
+        set a media ID such as `media-source://media_source/local/doorbell.mp3`.
+      input:
+        chime_media:
+          name: Doorbell media
+          description: >
+            Audio file or media ID for the doorbell sound. Home Assistant's
+            default announcement pre-chime is disabled so only this sound plays.
+          default:
+            media_content_id: /api/assist_satellite/static/preannounce.mp3
+            media_content_type: music
+          selector:
+            media:
+              accept:
+                - audio/*
+
+    optional_behaviour:
+      name: Optional Behaviour
+      icon: mdi:tune-variant
+      description: Optional short debounce for noisy Zigbee presses.
+      collapsed: true
+      input:
+        debounce_seconds:
+          name: Duplicate-press debounce
+          description: >
+            Ignore another doorbell activation within this many seconds of the
+            previous run starting. Keep this short. Set to 0 to rely only on
+            single-run execution mode (recommended when your button already
+            sends one clean MQTT device trigger per press).
+          default: 1
+          selector:
+            number:
+              min: 0
+              max: 5
+              step: 0.5
+              unit_of_measurement: seconds
+              mode: slider
+
+# single: respond immediately, never queue delayed chimes; ignore presses while
+# the current announcement is still running. A new press after completion is allowed.
+mode: single
+max_exceeded: silent
+
+variables:
+  debounce_seconds: !input debounce_seconds
+
+triggers:
+  - triggers: !input doorbell_trigger
+
+conditions:
+  - condition: template
+    value_template: >
+      {% set debounce = debounce_seconds | float(0) %}
+      {% if debounce <= 0 or this.attributes.last_triggered is none %}
+        true
+      {% else %}
+        {{ (now() - this.attributes.last_triggered).total_seconds() >= debounce }}
+      {% endif %}
+
+actions:
+  # One multi-target announce — do not loop satellites or insert delays.
+  # continue_on_error keeps other satellites ringing if one target is unavailable.
+  - action: assist_satellite.announce
+    continue_on_error: true
+    target:
+      entity_id: !input assist_satellites
+    data:
+      media_id: !input chime_media
+      preannounce: false
