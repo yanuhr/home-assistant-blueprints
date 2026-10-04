@@ -1,0 +1,132 @@
+# Version: 1.0.1
+# Aqara P100 Mailbox Notification (Zigbee2MQTT)
+#
+# Design notes:
+# - Mailbox activity is a transient Zigbee2MQTT action event, not an entity state.
+# - MQTT value_template + payload match only the configured action (default:
+#   vibration), so battery/linkquality/orientation/config updates are ignored.
+# - mode: single + post-notify delay implements the cooldown: further matching
+#   MQTT events are silently rejected until the delay finishes.
+
+blueprint:
+  name: Aqara P100 Mailbox Notification
+  author: yanuhr
+  description: >
+    Detects mailbox activity from an Aqara Multi-state Sensor P100 (object mode)
+    via Zigbee2MQTT MQTT messages.
+
+    When the sensor publishes a matching action event (default: `vibration`),
+    Home Assistant sends a mobile notification that the mailbox flap may have
+    been disturbed — possible new mail. Ordinary state updates such as battery,
+    linkquality, orientation, and detection settings do not notify.
+
+    No helpers or Zigbee2MQTT legacy action sensors are required.
+  domain: automation
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    mailbox_sensor:
+      name: Mailbox Sensor
+      icon: mdi:mailbox
+      description: >
+        Zigbee2MQTT device state topic and the action that means the mailbox
+        flap was disturbed. Default action is `vibration`.
+      input:
+        mqtt_topic:
+          name: Zigbee2MQTT MQTT topic
+          description: >
+            Device state topic for the P100, for example `zigbee2mqtt/Posta`.
+            Only JSON messages whose `action` equals the expected action below
+            will notify.
+          default: zigbee2mqtt/Posta
+          selector:
+            text:
+
+        expected_action:
+          name: Expected action
+          description: >
+            Zigbee2MQTT action value that should count as mailbox activity.
+            Keep `vibration` unless testing shows `movement` or `orientation`
+            works better for your mounting. Do not confuse this with the
+            `vibration_detection` configuration property.
+          default: vibration
+          selector:
+            select:
+              options:
+                - vibration
+                - movement
+                - orientation
+              custom_value: true
+
+    notification:
+      name: Notification
+      icon: mdi:bell-badge
+      description: Mobile app notification sent when mailbox activity is detected.
+      input:
+        notify_device:
+          name: Notification device
+          description: >
+            Device running the official Home Assistant Companion app that should
+            receive the mailbox alert.
+          selector:
+            device:
+              filter:
+                - integration: mobile_app
+
+        notify_title:
+          name: Notification title
+          default: New mail
+          selector:
+            text:
+
+        notify_message:
+          name: Notification message
+          default: >-
+            Activity was detected in the mailbox. There may be new mail.
+          selector:
+            text:
+              multiline: true
+
+    behaviour:
+      name: Behaviour
+      icon: mdi:timer-sand
+      description: Limits notification spam from a single mailbox interaction.
+      collapsed: true
+      input:
+        cooldown_seconds:
+          name: Duplicate-event cooldown
+          description: >
+            After a notification is sent, the automation waits this many seconds
+            before accepting another matching event. Duplicates during the wait
+            are ignored.
+          default: 30
+          selector:
+            number:
+              min: 5
+              max: 300
+              step: 5
+              unit_of_measurement: seconds
+              mode: slider
+
+# single + trailing delay: notify immediately, then hold the automation busy for
+# cooldown_seconds so duplicate vibrations are discarded (max_exceeded: silent).
+mode: single
+max_exceeded: silent
+
+triggers:
+  # Fires only when JSON action equals the configured expected action.
+  # Empty/missing action and ordinary attribute updates do not match.
+  - trigger: mqtt
+    topic: !input mqtt_topic
+    value_template: "{{ value_json.action | default('', true) }}"
+    payload: !input expected_action
+
+actions:
+  - domain: mobile_app
+    type: notify
+    device_id: !input notify_device
+    title: !input notify_title
+    message: !input notify_message
+
+  - delay:
+      seconds: !input cooldown_seconds
