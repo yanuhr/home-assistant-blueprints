@@ -1,4 +1,4 @@
-# Version: 1.1.0
+# Version: 1.2.0
 # Zigbee2MQTT Doorbell to Assist Satellites
 #
 # Design notes:
@@ -9,6 +9,16 @@
 # - mode: single prevents queued/stale chimes while playback is running.
 # - A short internal debounce suppresses duplicate MQTT deliveries of the same
 #   press without blocking a legitimate press a few seconds later.
+# - Startup protection uses sensor.uptime (Home Assistant instance age), not
+#   automation last_triggered. Replayed/retained MQTT state after restart is
+#   ignored until the configured grace period has elapsed.
+# - Debounce and startup protection are separate concerns; debounce alone does
+#   not prevent false rings after an HA restart.
+# - Prefer Zigbee2MQTT device-state retain disabled for this button unless you
+#   have a specific reason to enable it. Startup protection still applies if
+#   retained or republished state arrives during the grace period.
+# - Requires the Uptime integration (sensor.uptime). Enable it under
+#   Settings → Devices & services if it is not already present.
 # - preannounce is forced off so the configured ding-dong plays exactly once.
 
 blueprint:
@@ -21,6 +31,15 @@ blueprint:
     JSON payload contains `action: single`. A ding-dong is then announced on
     every selected Assist Satellite at once — including Home Assistant Voice
     Preview Edition devices that expose an `assist_satellite` entity.
+
+    After a Home Assistant restart, MQTT may republish or restore a previous
+    `action: single` payload. A configurable startup protection period (default
+    90 seconds) ignores those messages until Home Assistant has been running
+    longer than that period, measured via `sensor.uptime`. Real presses after
+    the grace period work immediately. Enable the Uptime integration if needed.
+
+    Zigbee2MQTT device-state retain should normally stay disabled for this
+    button. Startup protection still covers retained or reconnect republications.
 
     No button entity, device trigger, legacy action sensor, or helper is required.
   domain: automation
@@ -88,6 +107,31 @@ blueprint:
               accept:
                 - audio/*
 
+    advanced:
+      name: Advanced
+      icon: mdi:cog
+      description: >
+        Startup protection ignores MQTT `action: single` messages while Home
+        Assistant is still within its post-restart grace period. This prevents
+        false chimes from retained, restored, or republished Zigbee2MQTT state.
+      input:
+        startup_protection_seconds:
+          name: Startup protection
+          description: >
+            Seconds after Home Assistant starts during which doorbell MQTT
+            messages are ignored (default 90). Based on `sensor.uptime` (Home
+            Assistant instance age), not automation reload time. Set to 0 to
+            disable. Requires the Uptime integration. Genuine presses during
+            this window are also ignored (accepted trade-off).
+          default: 90
+          selector:
+            number:
+              min: 0
+              max: 300
+              step: 1
+              unit_of_measurement: seconds
+              mode: box
+
 # single: respond immediately, never queue delayed chimes; ignore presses while
 # the current announcement is still running. A new press after completion is allowed.
 mode: single
@@ -95,18 +139,34 @@ max_exceeded: silent
 
 # Internal debounce only (not a user setting): suppress duplicate deliveries of
 # the same press. Legitimate presses a few seconds later still ring.
+# startup_protection_seconds is Home Assistant uptime grace, not debounce.
 variables:
   debounce_seconds: 1
+  startup_protection_seconds: !input startup_protection_seconds
 
 triggers:
   # value_template is evaluated per message; compared to payload.
   # Non-JSON payloads and messages without action == single do not fire.
+  # Identical consecutive action: single messages still match (no state change
+  # required), so two genuine presses both work after the grace period.
   - trigger: mqtt
     topic: !input doorbell_mqtt_topic
     value_template: "{{ value_json.action | default('', true) }}"
     payload: "single"
 
 conditions:
+  # 1) Startup protection: HA instance age via sensor.uptime (not last_triggered).
+  #    When seconds is 0, protection is disabled. If Uptime is missing/unavailable
+  #    and protection is enabled, fail closed (do not chime).
+  - condition: template
+    value_template: >
+      {{ startup_protection_seconds | int == 0
+         or (
+              states('sensor.uptime') not in ['unknown', 'unavailable', '']
+              and now() - as_datetime(states('sensor.uptime'))
+                 > timedelta(seconds=startup_protection_seconds | int)
+            ) }}
+  # 2) Short duplicate-delivery debounce (separate from startup protection).
   - condition: template
     value_template: >
       {{ this.attributes.last_triggered is none
