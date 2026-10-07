@@ -1,24 +1,18 @@
-# Version: 1.2.0
+# Version: 1.3.0
 # Zigbee2MQTT Doorbell to Assist Satellites
 #
 # Design notes:
-# - Button presses are transient Zigbee2MQTT MQTT events, not HA entities.
-#   The automation listens to the device state topic and matches action == single.
-# - MQTT value_template + payload filtering ignores battery/linkquality/last_seen
-#   updates and empty/missing action values (including Z2M action clears).
+# - Physical presses are Zigbee2MQTT MQTT device action triggers, not inferred
+#   from the general device state topic JSON.
+# - The general state topic (zigbee2mqtt/<device>) can republish a historical
+#   action: single on reconnect, rejoin, Z2M restart, or MQTT resubscribe.
+#   That path is intentionally not used.
+# - Zigbee2MQTT discovers MQTT device triggers after each physical action has
+#   been generated at least once. Press the doorbell once before configuring
+#   so the `single` action appears for the device.
 # - mode: single prevents queued/stale chimes while playback is running.
-# - A short internal debounce suppresses duplicate MQTT deliveries of the same
-#   press without blocking a legitimate press a few seconds later.
-# - Startup protection uses sensor.uptime (Home Assistant instance age), not
-#   automation last_triggered. Replayed/retained MQTT state after restart is
-#   ignored until the configured grace period has elapsed.
-# - Debounce and startup protection are separate concerns; debounce alone does
-#   not prevent false rings after an HA restart.
-# - Prefer Zigbee2MQTT device-state retain disabled for this button unless you
-#   have a specific reason to enable it. Startup protection still applies if
-#   retained or republished state arrives during the grace period.
-# - Requires the Uptime integration (sensor.uptime). Enable it under
-#   Settings → Devices & services if it is not already present.
+# - No startup grace period, helpers, legacy action sensors, or state-payload
+#   JSON matching are required when using a true MQTT device action trigger.
 # - preannounce is forced off so the configured ding-dong plays exactly once.
 
 blueprint:
@@ -27,21 +21,22 @@ blueprint:
   description: >
     Turns a Zigbee2MQTT button into a whole-home doorbell.
 
-    Listens directly to the doorbell device MQTT state topic and rings when the
-    JSON payload contains `action: single`. A ding-dong is then announced on
-    every selected Assist Satellite at once — including Home Assistant Voice
-    Preview Edition devices that expose an `assist_satellite` entity.
+    Uses the Zigbee2MQTT MQTT device trigger for the physical button action
+    (recommended by Zigbee2MQTT). When the discovered `single` action fires,
+    a ding-dong is announced on every selected Assist Satellite at once —
+    including Home Assistant Voice Preview Edition devices that expose an
+    `assist_satellite` entity.
 
-    After a Home Assistant restart, MQTT may republish or restore a previous
-    `action: single` payload. A configurable startup protection period (default
-    90 seconds) ignores those messages until Home Assistant has been running
-    longer than that period, measured via `sensor.uptime`. Real presses after
-    the grace period work immediately. Enable the Uptime integration if needed.
+    First-time setup: press the physical doorbell once so Zigbee2MQTT can
+    discover the action trigger in Home Assistant, then select that MQTT
+    device here. The action subtype defaults to `single`.
 
-    Zigbee2MQTT device-state retain should normally stay disabled for this
-    button. Startup protection still covers retained or reconnect republications.
+    This blueprint does not listen to the general device state topic. State
+    republish on Zigbee reconnect, Zigbee2MQTT restart, device rejoin, or MQTT
+    recovery must not ring the doorbell.
 
-    No button entity, device trigger, legacy action sensor, or helper is required.
+    No button entity, legacy action sensor, helper, or startup grace period
+    is required.
   domain: automation
   homeassistant:
     min_version: "2025.4.0"
@@ -50,17 +45,28 @@ blueprint:
       name: Doorbell Button
       icon: mdi:doorbell
       description: >
-        Zigbee2MQTT publishes button presses as JSON on the device state topic.
-        Enter that topic below (friendly name may differ per installation).
+        Select the Zigbee2MQTT doorbell as an MQTT device and the action
+        subtype for a single press. Press the physical button once first so
+        Home Assistant discovers the action trigger.
       input:
-        doorbell_mqtt_topic:
-          name: Zigbee2MQTT MQTT topic
+        doorbell_device:
+          name: Zigbee2MQTT doorbell device
           description: >
-            Device state topic, for example `zigbee2mqtt/doorbell`.
-            Only messages whose JSON `action` value is exactly `single` ring the
-            chime. Battery, linkquality, last_seen, identify, empty action, and
-            other state updates are ignored.
-          default: zigbee2mqtt/doorbell
+            MQTT device for the Zigbee2MQTT doorbell button. Use the device
+            selector (MQTT integration). After selecting the device, ensure
+            the `single` action has been discovered by pressing the button
+            once if it is not listed yet in Developer tools / device triggers.
+          selector:
+            device:
+              filter:
+                - integration: mqtt
+              multiple: false
+        doorbell_action:
+          name: Button action subtype
+          description: >
+            Zigbee2MQTT MQTT device trigger subtype for a single press.
+            Usually `single`. Must match the discovered action for this device.
+          default: single
           selector:
             text:
 
@@ -107,71 +113,20 @@ blueprint:
               accept:
                 - audio/*
 
-    advanced:
-      name: Advanced
-      icon: mdi:cog
-      description: >
-        Startup protection ignores MQTT `action: single` messages while Home
-        Assistant is still within its post-restart grace period. This prevents
-        false chimes from retained, restored, or republished Zigbee2MQTT state.
-      input:
-        startup_protection_seconds:
-          name: Startup protection
-          description: >
-            Seconds after Home Assistant starts during which doorbell MQTT
-            messages are ignored (default 90). Based on `sensor.uptime` (Home
-            Assistant instance age), not automation reload time. Set to 0 to
-            disable. Requires the Uptime integration. Genuine presses during
-            this window are also ignored (accepted trade-off).
-          default: 90
-          selector:
-            number:
-              min: 0
-              max: 300
-              step: 1
-              unit_of_measurement: seconds
-              mode: box
-
 # single: respond immediately, never queue delayed chimes; ignore presses while
 # the current announcement is still running. A new press after completion is allowed.
 mode: single
 max_exceeded: silent
 
-# Internal debounce only (not a user setting): suppress duplicate deliveries of
-# the same press. Legitimate presses a few seconds later still ring.
-# startup_protection_seconds is Home Assistant uptime grace, not debounce.
-variables:
-  debounce_seconds: 1
-  startup_protection_seconds: !input startup_protection_seconds
-
 triggers:
-  # value_template is evaluated per message; compared to payload.
-  # Non-JSON payloads and messages without action == single do not fire.
-  # Identical consecutive action: single messages still match (no state change
-  # required), so two genuine presses both work after the grace period.
-  - trigger: mqtt
-    topic: !input doorbell_mqtt_topic
-    value_template: "{{ value_json.action | default('', true) }}"
-    payload: "single"
-
-conditions:
-  # 1) Startup protection: HA instance age via sensor.uptime (not last_triggered).
-  #    When seconds is 0, protection is disabled. If Uptime is missing/unavailable
-  #    and protection is enabled, fail closed (do not chime).
-  - condition: template
-    value_template: >
-      {{ startup_protection_seconds | int == 0
-         or (
-              states('sensor.uptime') not in ['unknown', 'unavailable', '']
-              and now() - as_datetime(states('sensor.uptime'))
-                 > timedelta(seconds=startup_protection_seconds | int)
-            ) }}
-  # 2) Short duplicate-delivery debounce (separate from startup protection).
-  - condition: template
-    value_template: >
-      {{ this.attributes.last_triggered is none
-         or (now() - this.attributes.last_triggered).total_seconds()
-            >= debounce_seconds }}
+  # Zigbee2MQTT MQTT device trigger (recommended). Fires only on a discovered
+  # action event — not on general state-topic republish.
+  # Consecutive identical presses (subtype: single) each fire a new trigger.
+  - trigger: device
+    domain: mqtt
+    device_id: !input doorbell_device
+    type: action
+    subtype: !input doorbell_action
 
 actions:
   # One multi-target announce — do not loop satellites or insert delays.
