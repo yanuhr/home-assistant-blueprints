@@ -1,10 +1,10 @@
 blueprint:
-  name: Upozornenie na výmenu filtra (fan-name / HA 2026.1) - stable v5 – iOS compact
+  name: Upozornenie na výmenu filtra (fan-name / HA 2026.1) - stable v6 – iOS compact device names
   description: >
     Notifikácia keď je replace_filter binary_sensor ON.
     Denne pošle súhrn všetkých ON senzorov. Pri OFF->ON pošle hneď (ak je immediate zapnuté).
-    Predvolený formát ios_compact (jeden riadok, iOS-safe). Voliteľný detailed režim.
-    Názov berie primárne z fan entity na tom istom zariadení (device registry).
+    Predvolený formát ios_compact (jeden riadok, iOS-safe) s položkami „Miestnosť – Názov zariadenia“.
+    Voliteľný detailed režim. Názov berie primárne z fan entity na tom istom zariadení.
 
   domain: automation
 
@@ -148,11 +148,11 @@ action:
           {{- base -}}
         {%- endif %}
 
-      # ios_compact: jeden riadok, join(', '), trim, bez newline
+      # ios_compact: jeden riadok, položky „Miestnosť – Zariadenie“, join('; '), trim, bez newline
       # detailed: voliteľný viacriadkový zoznam
       message_text: >-
         {%- set total = active_ids | length -%}
-        {%- set out = namespace(text='', labels=[], details=[]) -%}
+        {%- set out = namespace(text='', details=[]) -%}
         {%- set fmt = (message_format | default('ios_compact') | string | trim) -%}
         {%- set limit = max_message_length | int -%}
         {%- for eid in active_ids -%}
@@ -165,9 +165,7 @@ action:
           {%- set name = name or state_attr(eid, 'friendly_name') or eid -%}
           {%- set ar = area_name(fan_eid) if fan_eid else area_name(eid) -%}
           {%- set ar = ar if ar and (ar | string | trim) not in ['', 'None', 'unknown', 'unavailable'] else none -%}
-          {%- set label = (ar if ar else name) | string | trim -%}
           {%- set detail = (((ar ~ ' – ') if ar else '') ~ name) | string | trim -%}
-          {%- set out.labels = out.labels + [label] -%}
           {%- set out.details = out.details + [detail] -%}
         {%- endfor -%}
         {%- if total <= 0 -%}
@@ -191,18 +189,18 @@ action:
             {%- set out.text = 'Výmena filtra: ' ~ out.details[0] -%}
           {%- else -%}
             {%- set prefix = 'Vymeň filtre (' ~ total ~ '): ' -%}
-            {%- set pool = out.labels[0:max_items] -%}
+            {%- set pool = out.details[0:max_items] -%}
             {%- set fit = namespace(parts=[], stop=false) -%}
-            {%- for label in pool -%}
+            {%- for item in pool -%}
               {%- if not fit.stop -%}
-                {%- set trial_parts = fit.parts + [label] -%}
+                {%- set trial_parts = fit.parts + [item] -%}
                 {%- set remaining = total - (trial_parts | length) -%}
-                {%- set body = trial_parts | join(', ') -%}
+                {%- set body = trial_parts | join('; ') -%}
                 {%- set trial = prefix ~ body ~ ((' +' ~ remaining ~ ' ďalších') if remaining > 0 else '') -%}
                 {%- if (trial | length) <= limit -%}
                   {%- set fit.parts = trial_parts -%}
                 {%- elif (fit.parts | length) == 0 -%}
-                  {%- set fit.parts = [label] -%}
+                  {%- set fit.parts = [item] -%}
                   {%- set fit.stop = true -%}
                 {%- else -%}
                   {%- set fit.stop = true -%}
@@ -210,7 +208,7 @@ action:
               {%- endif -%}
             {%- endfor -%}
             {%- set remaining = total - (fit.parts | length) -%}
-            {%- set body = fit.parts | join(', ') -%}
+            {%- set body = fit.parts | join('; ') -%}
             {%- set out.text = prefix ~ body ~ ((' +' ~ remaining ~ ' ďalších') if remaining > 0 else '') -%}
           {%- endif -%}
         {%- endif -%}
