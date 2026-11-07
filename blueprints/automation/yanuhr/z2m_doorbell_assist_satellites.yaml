@@ -1,18 +1,25 @@
-# Version: 1.3.0
+# Version: 1.4.1
 # Zigbee2MQTT Doorbell to Assist Satellites
 #
 # Design notes:
-# - Physical presses are Zigbee2MQTT MQTT device action triggers, not inferred
-#   from the general device state topic JSON.
+# - Physical presses are Home Assistant MQTT event entities exposed by
+#   Zigbee2MQTT (experimental event entities), not MQTT device triggers and
+#   not the general device state topic.
+# - MQTT device triggers for this button can still fire on reconnect / wakeup
+#   / ping / rejoin without a physical press, so they are not used.
 # - The general state topic (zigbee2mqtt/<device>) can republish a historical
-#   action: single on reconnect, rejoin, Z2M restart, or MQTT resubscribe.
-#   That path is intentionally not used.
-# - Zigbee2MQTT discovers MQTT device triggers after each physical action has
-#   been generated at least once. Press the doorbell once before configuring
-#   so the `single` action appears for the device.
+#   action: single on reconnect. That path is intentionally not used and must
+#   not be reintroduced as a fallback.
+# - Enable Zigbee2MQTT Home Assistant experimental event entities, restart Z2M
+#   if required, press the doorbell once, then select the discovered event.*
+#   entity below.
+# - Trigger uses to: null (any new main state, ignoring attribute-only changes).
+#   The event entity main state is the timestamp of the latest event, so every
+#   genuine press produces a new timestamp even when event_type stays `single`.
+#   Do not trigger on event_type attribute changes.
+# - Conditions then require a valid from/to state, reject unavailable/unknown
+#   previous states, and require event_type == configured value (default single).
 # - mode: single prevents queued/stale chimes while playback is running.
-# - No startup grace period, helpers, legacy action sensors, or state-payload
-#   JSON matching are required when using a true MQTT device action trigger.
 # - preannounce is forced off so the configured ding-dong plays exactly once.
 
 blueprint:
@@ -21,22 +28,28 @@ blueprint:
   description: >
     Turns a Zigbee2MQTT button into a whole-home doorbell.
 
-    Uses the Zigbee2MQTT MQTT device trigger for the physical button action
-    (recommended by Zigbee2MQTT). When the discovered `single` action fires,
-    a ding-dong is announced on every selected Assist Satellite at once —
+    Uses the Zigbee2MQTT Home Assistant MQTT event entity for the physical
+    button action. When that event entity reports `event_type: single`, a
+    ding-dong is announced on every selected Assist Satellite at once —
     including Home Assistant Voice Preview Edition devices that expose an
     `assist_satellite` entity.
 
-    First-time setup: press the physical doorbell once so Zigbee2MQTT can
-    discover the action trigger in Home Assistant, then select that MQTT
-    device here. The action subtype defaults to `single`.
+    Setup:
+    1. In Zigbee2MQTT, enable Home Assistant experimental event entities
+       (`homeassistant.experimental_event_entities: true`).
+    2. Restart Zigbee2MQTT if required.
+    3. Press the physical doorbell once so the `event.*` entity appears and
+       updates.
+    4. Select that event entity below.
 
-    This blueprint does not listen to the general device state topic. State
-    republish on Zigbee reconnect, Zigbee2MQTT restart, device rejoin, or MQTT
-    recovery must not ring the doorbell.
+    This blueprint does not use MQTT device triggers or the general device
+    state topic. It reacts only when the event entity's main state timestamp
+    changes (`to: null`, ignoring attribute-only updates), then checks that
+    the previous state was not unavailable/unknown and that event_type is
+    `single`. Reconnect and availability recovery must not ring the doorbell.
 
-    No button entity, legacy action sensor, helper, or startup grace period
-    is required.
+    No helpers, legacy action sensors, startup grace period, or debounce
+    windows are used.
   domain: automation
   homeassistant:
     min_version: "2025.4.0"
@@ -45,27 +58,27 @@ blueprint:
       name: Doorbell Button
       icon: mdi:doorbell
       description: >
-        Select the Zigbee2MQTT doorbell as an MQTT device and the action
-        subtype for a single press. Press the physical button once first so
-        Home Assistant discovers the action trigger.
+        Select the Zigbee2MQTT doorbell MQTT event entity. Enable Z2M
+        experimental event entities first, then press the button once so the
+        event entity is discovered.
       input:
-        doorbell_device:
-          name: Zigbee2MQTT doorbell device
+        doorbell_event_entity:
+          name: Doorbell event entity
           description: >
-            MQTT device for the Zigbee2MQTT doorbell button. Use the device
-            selector (MQTT integration). After selecting the device, ensure
-            the `single` action has been discovered by pressing the button
-            once if it is not listed yet in Developer tools / device triggers.
+            Home Assistant `event` entity for the Zigbee2MQTT doorbell
+            (for example `event.doorbell_action` or `event.doorbell_click`).
+            Domain is restricted to `event`. Do not select a sensor, binary
+            sensor, or MQTT device trigger.
           selector:
-            device:
+            entity:
               filter:
-                - integration: mqtt
+                - domain: event
               multiple: false
-        doorbell_action:
-          name: Button action subtype
+        doorbell_event_type:
+          name: Event type
           description: >
-            Zigbee2MQTT MQTT device trigger subtype for a single press.
-            Usually `single`. Must match the discovered action for this device.
+            Value of the event entity `event_type` attribute for a normal
+            single press. Usually `single`.
           default: single
           selector:
             text:
@@ -118,15 +131,29 @@ blueprint:
 mode: single
 max_exceeded: silent
 
+variables:
+  doorbell_event_type: !input doorbell_event_type
+
 triggers:
-  # Zigbee2MQTT MQTT device trigger (recommended). Fires only on a discovered
-  # action event — not on general state-topic republish.
-  # Consecutive identical presses (subtype: single) each fire a new trigger.
-  - trigger: device
-    domain: mqtt
-    device_id: !input doorbell_device
-    type: action
-    subtype: !input doorbell_action
+  # Any new main state (event timestamp), ignoring attribute-only updates.
+  # to: null = "Any state (ignoring attribute changes)" in the HA UI.
+  # Do not trigger on event_type attribute changes — consecutive genuine
+  # presses keep event_type `single`; the timestamp state distinguishes them.
+  - trigger: state
+    entity_id: !input doorbell_event_entity
+    to: null
+
+conditions:
+  # Reject missing from_state and reconnect / availability recovery.
+  - condition: template
+    value_template: >
+      {{ trigger.from_state is not none
+         and trigger.from_state.state not in ['unavailable', 'unknown'] }}
+  # Require a valid to_state with the configured press event type.
+  - condition: template
+    value_template: >
+      {{ trigger.to_state is not none
+         and trigger.to_state.attributes.get('event_type') == doorbell_event_type }}
 
 actions:
   # One multi-target announce — do not loop satellites or insert delays.

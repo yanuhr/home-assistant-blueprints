@@ -1,5 +1,5 @@
 blueprint:
-  name: Upozornenie na výmenu filtra (fan-name / HA 2026.1) - stable v2
+  name: Upozornenie na výmenu filtra (fan-name / HA 2026.1) - stable v3
   description: >
     Notifikácia keď je replace_filter binary_sensor ON.
     Denne pošle súhrn všetkých ON senzorov. Pri OFF->ON pošle hneď (ak je immediate zapnuté).
@@ -111,35 +111,43 @@ action:
           false
         {% endif %}
 
+      # Riadky cez namespace + join('\n'); out.text mimo if-scope (Jinja2 block scoping)
       message_text: >-
-        {% set total = active_ids | length %}
-        {% if total == 0 %}
-          {{ '' }}
-        {% elif total == 1 %}
-          {% set eid = active_ids[0] %}
-          {% set did = device_id(eid) %}
-          {% set ents = device_entities(did) if did else [] %}
-          {% set fan_eid = (ents | map('string') | select('match','^fan\\.') | list | first) %}
-          {% set name = state_attr(fan_eid,'friendly_name') if fan_eid else (device_attr(did,'name') if did else none) %}
-          {% set name = name or state_attr(eid,'friendly_name') or eid %}
-          {% set ar = area_name(fan_eid) if fan_eid else area_name(eid) %}
-          {{ (ar ~ ' – ' if ar else '') ~ name ~ ': vymeň filter.' }}
-        {% else %}
-          {% set shown = active_ids[0:max_items] %}
-          Vymeň filter v týchto čističkách:
-          {% for eid in shown %}
-            {% set did = device_id(eid) %}
-            {% set ents = device_entities(did) if did else [] %}
-            {% set fan_eid = (ents | map('string') | select('match','^fan\\.') | list | first) %}
-            {% set name = state_attr(fan_eid,'friendly_name') if fan_eid else (device_attr(did,'name') if did else none) %}
-            {% set name = name or state_attr(eid,'friendly_name') or eid %}
-            {% set ar = area_name(fan_eid) if fan_eid else area_name(eid) %}
-            - {{ (ar ~ ' – ' if ar else '') ~ name }}
-          {% endfor %}
-          {% if total > (shown | length) %}
-            - … a ďalších {{ total - (shown | length) }}
-          {% endif %}
-        {% endif %}
+        {%- set total = active_ids | length -%}
+        {%- set out = namespace(text='') -%}
+        {%- if total == 1 -%}
+          {%- set eid = active_ids[0] -%}
+          {%- set did = device_id(eid) -%}
+          {%- set ents = device_entities(did) if did else [] -%}
+          {%- set fans = ents | map('string') | select('match', '^fan\\.') | list -%}
+          {%- set fan_eid = fans[0] if fans | length > 0 else none -%}
+          {%- set name = state_attr(fan_eid, 'friendly_name') if fan_eid else none -%}
+          {%- set name = name or (device_attr(did, 'name') if did else none) -%}
+          {%- set name = name or state_attr(eid, 'friendly_name') or eid -%}
+          {%- set ar = area_name(fan_eid) if fan_eid else area_name(eid) -%}
+          {%- set ar = ar if ar and (ar | string | trim) not in ['', 'None', 'unknown', 'unavailable'] else none -%}
+          {%- set out.text = ((ar ~ ' – ') if ar else '') ~ name ~ ': Vymeň filter.' -%}
+        {%- elif total > 1 -%}
+          {%- set ns = namespace(lines=['Vymeň filter v týchto čističkách:']) -%}
+          {%- set shown = active_ids[0:max_items] -%}
+          {%- for eid in shown -%}
+            {%- set did = device_id(eid) -%}
+            {%- set ents = device_entities(did) if did else [] -%}
+            {%- set fans = ents | map('string') | select('match', '^fan\\.') | list -%}
+            {%- set fan_eid = fans[0] if fans | length > 0 else none -%}
+            {%- set name = state_attr(fan_eid, 'friendly_name') if fan_eid else none -%}
+            {%- set name = name or (device_attr(did, 'name') if did else none) -%}
+            {%- set name = name or state_attr(eid, 'friendly_name') or eid -%}
+            {%- set ar = area_name(fan_eid) if fan_eid else area_name(eid) -%}
+            {%- set ar = ar if ar and (ar | string | trim) not in ['', 'None', 'unknown', 'unavailable'] else none -%}
+            {%- set ns.lines = ns.lines + ['• ' ~ ((ar ~ ' – ') if ar else '') ~ name] -%}
+          {%- endfor -%}
+          {%- if total > (shown | length) -%}
+            {%- set ns.lines = ns.lines + ['• … a ďalších ' ~ ((total - (shown | length)) | string)] -%}
+          {%- endif -%}
+          {%- set out.text = ns.lines | join('\n') -%}
+        {%- endif -%}
+        {{- out.text -}}
 
   - if:
       - condition: template
