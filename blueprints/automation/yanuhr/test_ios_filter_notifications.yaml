@@ -1,0 +1,55 @@
+blueprint:
+  name: Test iOS notifikácií (filter / static A-B-C)
+  description: >
+    Pošle tri statické testovacie notifikácie bez Jinja formátovania zoznamov.
+    Cieľ: overiť, či iPhone zobrazí obyčajný text (nie "...").
+    Spusti automatizáciu manuálne.
+
+  domain: automation
+
+  input:
+    notification_services:
+      name: Notifikačné služby
+      description: Napr. notify.mobile_app_iphone_jan
+      default: []
+      selector:
+        text:
+          multiple: true
+
+trigger:
+  - platform: event
+    event_type: test_ios_filter_notifications
+
+condition: []
+
+action:
+  - variables:
+      notify_services: !input notification_services
+      services: >-
+        {{ notify_services | default([]) | map('string') | map('trim') | reject('equalto','') | unique | list }}
+
+  - if:
+      - condition: template
+        value_template: "{{ services | length == 0 }}"
+    then:
+      - stop: "Chýba notify služba"
+    else:
+      - repeat:
+          for_each: "{{ services }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              data:
+                title: "Test A"
+                message: "Test iPhone"
+            - delay: "00:00:02"
+            - service: "{{ repeat.item }}"
+              data:
+                title: "Test B"
+                message: "Vymeň filter: Obývačka"
+            - delay: "00:00:02"
+            - service: "{{ repeat.item }}"
+              data:
+                title: "Test C"
+                message: "Vymeň filtre (3): Obývačka, Spálňa, Pracovňa"
+
+mode: single

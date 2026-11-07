@@ -1,8 +1,9 @@
 blueprint:
-  name: Upozornenie na výmenu filtra (fan-name / HA 2026.1) - stable v3
+  name: Upozornenie na výmenu filtra (fan-name / HA 2026.1) - stable v5 – iOS compact
   description: >
     Notifikácia keď je replace_filter binary_sensor ON.
     Denne pošle súhrn všetkých ON senzorov. Pri OFF->ON pošle hneď (ak je immediate zapnuté).
+    Predvolený formát ios_compact (jeden riadok, iOS-safe). Voliteľný detailed režim.
     Názov berie primárne z fan entity na tom istom zariadení (device registry).
 
   domain: automation
@@ -47,6 +48,31 @@ blueprint:
       selector:
         text: {}
 
+    message_format:
+      name: Formát správy
+      description: >
+        ios_compact = jeden riadok bez newline (odporúčané pre iPhone).
+        detailed = viacriadkový zoznam s odrážkami.
+      default: ios_compact
+      selector:
+        select:
+          options:
+            - label: iOS compact (odporúčané)
+              value: ios_compact
+            - label: Detailed (viacriadkový)
+              value: detailed
+
+    max_message_length:
+      name: Max dĺžka správy (ios_compact)
+      description: Pri prekročení sa skráti zoznam a doplní +N ďalších
+      default: 140
+      selector:
+        number:
+          min: 40
+          max: 500
+          mode: box
+          step: 1
+
     max_list_items:
       name: Max položiek v správe
       default: 10
@@ -83,6 +109,8 @@ variables:
   use_persistent: !input use_persistent_fallback
   immediate: !input immediate_notification
   title: !input title
+  message_format: !input message_format
+  max_message_length: !input max_message_length
   max_items: !input max_list_items
   debug: !input debug
 
@@ -92,7 +120,7 @@ action:
         {% if trigger is defined and trigger.id is defined %}{{ trigger.id }}{% else %}manual{% endif %}
 
       notify_services_filtered: >-
-        {% set services = notify_services | default([]) %}
+        {% set services = notify_services | default([]) -%}
         {{ services | map('string') | map('trim') | reject('equalto','') | unique | list }}
 
       # VŽDY vypočítaj ON senzory zo zoznamu (žiadne trigger.entity_id)
@@ -103,51 +131,90 @@ action:
             | list }}
 
       should_notify: >-
-        {% if run_id in ['daily','manual'] %}
+        {% if run_id in ['daily','manual'] -%}
           {{ active_ids | length > 0 }}
-        {% elif run_id == 'became_on' %}
+        {%- elif run_id == 'became_on' -%}
           {{ immediate and (active_ids | length > 0) }}
-        {% else %}
+        {%- else -%}
           false
-        {% endif %}
+        {%- endif %}
 
-      # Riadky cez namespace + join('\n'); out.text mimo if-scope (Jinja2 block scoping)
+      notify_title: >-
+        {%- set total = active_ids | length -%}
+        {%- set base = (title | string | trim) if title else 'Výmena filtra' -%}
+        {%- if total > 1 -%}
+          {{- base ~ ' (' ~ total ~ ')' -}}
+        {%- else -%}
+          {{- base -}}
+        {%- endif %}
+
+      # ios_compact: jeden riadok, join(', '), trim, bez newline
+      # detailed: voliteľný viacriadkový zoznam
       message_text: >-
         {%- set total = active_ids | length -%}
-        {%- set out = namespace(text='') -%}
-        {%- if total == 1 -%}
-          {%- set eid = active_ids[0] -%}
+        {%- set out = namespace(text='', labels=[], details=[]) -%}
+        {%- set fmt = (message_format | default('ios_compact') | string | trim) -%}
+        {%- set limit = max_message_length | int -%}
+        {%- for eid in active_ids -%}
           {%- set did = device_id(eid) -%}
           {%- set ents = device_entities(did) if did else [] -%}
           {%- set fans = ents | map('string') | select('match', '^fan\\.') | list -%}
-          {%- set fan_eid = fans[0] if fans | length > 0 else none -%}
+          {%- set fan_eid = fans[0] if (fans | length > 0) else none -%}
           {%- set name = state_attr(fan_eid, 'friendly_name') if fan_eid else none -%}
           {%- set name = name or (device_attr(did, 'name') if did else none) -%}
           {%- set name = name or state_attr(eid, 'friendly_name') or eid -%}
           {%- set ar = area_name(fan_eid) if fan_eid else area_name(eid) -%}
           {%- set ar = ar if ar and (ar | string | trim) not in ['', 'None', 'unknown', 'unavailable'] else none -%}
-          {%- set out.text = ((ar ~ ' – ') if ar else '') ~ name ~ ': Vymeň filter.' -%}
-        {%- elif total > 1 -%}
-          {%- set ns = namespace(lines=['Vymeň filter v týchto čističkách:']) -%}
-          {%- set shown = active_ids[0:max_items] -%}
-          {%- for eid in shown -%}
-            {%- set did = device_id(eid) -%}
-            {%- set ents = device_entities(did) if did else [] -%}
-            {%- set fans = ents | map('string') | select('match', '^fan\\.') | list -%}
-            {%- set fan_eid = fans[0] if fans | length > 0 else none -%}
-            {%- set name = state_attr(fan_eid, 'friendly_name') if fan_eid else none -%}
-            {%- set name = name or (device_attr(did, 'name') if did else none) -%}
-            {%- set name = name or state_attr(eid, 'friendly_name') or eid -%}
-            {%- set ar = area_name(fan_eid) if fan_eid else area_name(eid) -%}
-            {%- set ar = ar if ar and (ar | string | trim) not in ['', 'None', 'unknown', 'unavailable'] else none -%}
-            {%- set ns.lines = ns.lines + ['• ' ~ ((ar ~ ' – ') if ar else '') ~ name] -%}
-          {%- endfor -%}
-          {%- if total > (shown | length) -%}
-            {%- set ns.lines = ns.lines + ['• … a ďalších ' ~ ((total - (shown | length)) | string)] -%}
+          {%- set label = (ar if ar else name) | string | trim -%}
+          {%- set detail = (((ar ~ ' – ') if ar else '') ~ name) | string | trim -%}
+          {%- set out.labels = out.labels + [label] -%}
+          {%- set out.details = out.details + [detail] -%}
+        {%- endfor -%}
+        {%- if total <= 0 -%}
+          {%- set out.text = '' -%}
+        {%- elif fmt == 'detailed' -%}
+          {%- if total == 1 -%}
+            {%- set out.text = out.details[0] ~ ': Vymeň filter.' -%}
+          {%- else -%}
+            {%- set lines = namespace(rows=['Vymeň filter v týchto čističkách:']) -%}
+            {%- set shown = out.details[0:max_items] -%}
+            {%- for d in shown -%}
+              {%- set lines.rows = lines.rows + ['• ' ~ d] -%}
+            {%- endfor -%}
+            {%- if total > (shown | length) -%}
+              {%- set lines.rows = lines.rows + ['• … a ďalších ' ~ ((total - (shown | length)) | string)] -%}
+            {%- endif -%}
+            {%- set out.text = lines.rows | join('\n') -%}
           {%- endif -%}
-          {%- set out.text = ns.lines | join('\n') -%}
+        {%- else -%}
+          {%- if total == 1 -%}
+            {%- set out.text = 'Výmena filtra: ' ~ out.details[0] -%}
+          {%- else -%}
+            {%- set prefix = 'Vymeň filtre (' ~ total ~ '): ' -%}
+            {%- set pool = out.labels[0:max_items] -%}
+            {%- set fit = namespace(parts=[], stop=false) -%}
+            {%- for label in pool -%}
+              {%- if not fit.stop -%}
+                {%- set trial_parts = fit.parts + [label] -%}
+                {%- set remaining = total - (trial_parts | length) -%}
+                {%- set body = trial_parts | join(', ') -%}
+                {%- set trial = prefix ~ body ~ ((' +' ~ remaining ~ ' ďalších') if remaining > 0 else '') -%}
+                {%- if (trial | length) <= limit -%}
+                  {%- set fit.parts = trial_parts -%}
+                {%- elif (fit.parts | length) == 0 -%}
+                  {%- set fit.parts = [label] -%}
+                  {%- set fit.stop = true -%}
+                {%- else -%}
+                  {%- set fit.stop = true -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- set remaining = total - (fit.parts | length) -%}
+            {%- set body = fit.parts | join(', ') -%}
+            {%- set out.text = prefix ~ body ~ ((' +' ~ remaining ~ ' ďalších') if remaining > 0 else '') -%}
+          {%- endif -%}
         {%- endif -%}
-        {{- out.text -}}
+        {{- out.text | replace('\r', '') | trim -}}
 
   - if:
       - condition: template
@@ -160,6 +227,12 @@ action:
           message: >-
             run_id={{ run_id }}
             should_notify={{ should_notify }}
+            message_format={{ message_format }}
+            notify_title={{ notify_title }}
+            msg_len={{ message_text | length }}
+            msg_newlines={{ message_text.split('\n') | length - 1 }}
+            msg_starts_with_ws={{ message_text[:1] in [' ', '\n', '\t', '\r'] }}
+            msg_first100={{ message_text[:100] }}
             active_ids={{ active_ids }}
             notify_services_filtered={{ notify_services_filtered }}
 
@@ -178,7 +251,7 @@ action:
                       sequence:
                         - service: "{{ repeat.item }}"
                           data:
-                            title: "{{ title }}"
+                            title: "{{ notify_title }}"
                             message: "{{ message_text }}"
             default:
               - if:
@@ -188,5 +261,5 @@ action:
                   - service: persistent_notification.create
                     data:
                       notification_id: "filter_replace"
-                      title: "{{ title }}"
+                      title: "{{ notify_title }}"
                       message: "{{ message_text }}"
