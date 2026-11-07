@@ -1,24 +1,26 @@
 blueprint:
-  name: Battery Monitor v4
+  name: Battery Monitor v5 – Simple iOS Daily
   description: >
-    Monitors battery sensors and sends notifications when battery level
-    is below threshold. Notifications repeat daily until battery recovers.
-    Memory is stored as JSON list in input_text.
+    Raz denne skontroluje vybrané batérie a na iPhone pošle jednu súhrnnú
+    notifikáciu so zariadeniami na limite alebo pod ním.
+    Bez pomocných entít, histórie, JSON a okamžitých upozornení.
+
   domain: automation
 
   input:
     battery_sensors:
-      name: Battery Sensors
-      description: Select battery sensors to monitor
+      name: Senzory batérií
+      description: Konkrétne senzory batérie (percentá), ktoré sa majú kontrolovať
       selector:
         entity:
           multiple: true
           filter:
             - domain: sensor
-            - device_class: battery
+              device_class: battery
 
     threshold:
-      name: Battery Threshold (%)
+      name: Limit batérie (%)
+      description: Do správy patria batérie s kapacitou nižšou alebo rovnou tejto hodnote
       default: 20
       selector:
         number:
@@ -29,39 +31,39 @@ blueprint:
           step: 1
 
     notification_time:
-      name: Notification Time
+      name: Čas notifikácie
+      description: Každý deň v tomto čase sa aktuálne stavy vyhodnotia odznova
       default: "08:00:00"
       selector:
         time: {}
 
     notification_services:
-      name: Notification Services
-      description: List of notification services (e.g., notify.mobile_app_x), one per line
+      name: Notifikačné služby
+      description: Služby notify.mobile_app_…, každá na nový riadok
       default: []
       selector:
         text:
           multiple: true
 
     use_persistent_fallback:
-      name: Use Persistent Fallback
-      description: If no notification services provided, create persistent notification in HA
+      name: Persistent fallback
+      description: Ak nie je nastavená žiadna mobilná služba, vytvorí notifikáciu v Home Assistant
       default: true
       selector:
         boolean: {}
 
-    memory_helper:
-      name: Memory Helper
-      description: input_text entity where JSON list of currently low batteries is stored
+    max_message_length:
+      name: Max. dĺžka správy
+      description: >
+        Pri prekročení sa zobrazí čo najviac celých položiek a na koniec sa doplní +N ďalších.
+        Počet v titulku je vždy počet všetkých slabých batérií.
+      default: 180
       selector:
-        entity:
-          domain: input_text
-
-    debug:
-      name: Debug Mode
-      description: Enable debug notifications for invalid entities
-      default: false
-      selector:
-        boolean: {}
+        number:
+          min: 40
+          max: 500
+          mode: box
+          step: 1
 
 trigger:
   - platform: time
@@ -72,196 +74,128 @@ variables:
   sensors: !input battery_sensors
   notify_services: !input notification_services
   use_persistent_fallback: !input use_persistent_fallback
-  memory_helper: !input memory_helper
-  debug: !input debug
+  max_message_length: !input max_message_length
 
 mode: single
 
 action:
   - variables:
       notify_services_filtered: >-
-        {% set services = notify_services | default([]) %}
-        {{ services | map('string') | map('trim') | reject('equalto', '') | unique | list }}
-      memory_list: >-
-        {% set raw = states(memory_helper) | string %}
-        {% set raw_trimmed = raw | trim %}
-        {% if raw_trimmed in ['', 'unknown', 'unavailable', 'none'] %}
-          []
-        {% elif raw_trimmed | length >= 2 and raw_trimmed[0] == '[' and raw_trimmed[-1] == ']' %}
-          {% set parsed = raw_trimmed | from_json %}
-          {% if parsed is list %}
-            {{ parsed }}
-          {% else %}
-            []
-          {% endif %}
-        {% else %}
-          []
-        {% endif %}
-      current_low_entities: []
-      current_low_batteries: []
-      recovered_batteries: []
-      unavailable_memory_entities: []
-      invalid_entities: []
+        {%- set services = [notify_services] if (notify_services is string) else (notify_services if (notify_services is iterable) else []) -%}
+        {{- services | map('string') | map('trim') | reject('equalto', '') | unique | list -}}
 
-  - repeat:
-      for_each: "{{ sensors }}"
-      sequence:
-        - variables:
-            ent: "{{ repeat.item }}"
-            raw: "{{ states(repeat.item) | string }}"
-            norm: "{{ raw | trim | lower | replace(',', '.') | replace('%', '') | replace(' ', '') }}"
-            lvl: >-
-              {% set v_float = norm | float(default=-1) %}
-              {% if v_float < 0 or v_float > 100 %}
-                -1
-              {% else %}
-                {{ v_float }}
-              {% endif %}
-            display_name: "{{ state_attr(repeat.item, 'friendly_name') or repeat.item }}"
-            unit_of_measurement: "{{ state_attr(repeat.item, 'unit_of_measurement') }}"
+      low_labels: >-
+        {%- set sensor_list = [sensors] if (sensors is string) else ((sensors | list) if (sensors is iterable) else []) -%}
+        {%- set limit_pct = threshold | float(20) -%}
+        {%- set ns = namespace(items=[], seen=[]) -%}
+        {%- for eid in sensor_list -%}
+          {%- set ent = eid | string | trim -%}
+          {%- if ent -%}
+            {%- set norm = states(ent) | string | trim | lower | replace(',', '.') | replace('%', '') | replace(' ', '') -%}
+            {%- if norm not in ['', 'unknown', 'unavailable', 'none', 'null'] -%}
+              {%- set lvl = norm | float(-1) -%}
+              {%- if lvl >= 0 and lvl <= 100 and lvl <= limit_pct -%}
+                {%- set did = device_id(ent) -%}
+                {%- set dev_name = (device_attr(did, 'name_by_user') or device_attr(did, 'name') or '') if did else '' -%}
+                {%- set raw_name = (dev_name or state_attr(ent, 'friendly_name') or ent) | string | regex_replace('\\s+', ' ') | trim | replace(';', ',') -%}
+                {%- set name_s = raw_name if raw_name else ent -%}
+                {%- set ar_raw = area_name(ent) or (area_name(did) if did else none) -%}
+                {%- set ar_s = (ar_raw | string | regex_replace('\\s+', ' ') | trim | replace(';', ',')) if ar_raw else '' -%}
+                {%- set ar_s = '' if (ar_s | lower) in ['none', 'unknown', 'unavailable'] else ar_s -%}
+                {%- set ar_len = ar_s | length -%}
+                {%- set name_low = name_s | lower -%}
+                {%- set row = namespace(room=false, label=name_s) -%}
+                {%- if ar_len > 0 -%}
+                  {%- set head = name_low[:ar_len] -%}
+                  {%- set nxt = name_low[ar_len:ar_len + 1] -%}
+                  {%- if head == (ar_s | lower) and (nxt == '' or nxt in [' ', '-', '–', '—', ':', '/']) -%}
+                    {%- set row.room = true -%}
+                  {%- endif -%}
+                {%- endif -%}
+                {%- set row.label = name_s if (row.room or ar_len == 0) else (ar_s ~ ' – ' ~ name_s) -%}
+                {%- if row.label in ns.seen -%}
+                  {%- set row.label = row.label ~ ' – ' ~ ent -%}
+                {%- endif -%}
+                {%- set ns.seen = ns.seen + [row.label] -%}
+                {%- set pct = (lvl | round(0)) | int(0) -%}
+                {%- set ns.items = ns.items + [{'label': row.label, 'pct': pct}] -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {{- ns.items -}}
 
-        - if:
-            - condition: template
-              value_template: "{{ lvl == -1 }}"
-          then:
-            - variables:
-                invalid_entities: "{{ invalid_entities + [{'ent': ent, 'raw': raw, 'unit': unit_of_measurement}] }}"
+      notify_title: >-
+        {%- set labels = low_labels if (low_labels is iterable and low_labels is not string and low_labels is not mapping) else [] -%}
+        {%- set total = labels | length -%}
+        {%- if total > 1 -%}
+          {{- 'Slabé batérie (' ~ total ~ ')' -}}
+        {%- else -%}
+          {{- 'Slabá batéria' -}}
+        {%- endif -%}
 
-        - if:
-            - condition: template
-              value_template: "{{ lvl >= 0 and lvl <= threshold }}"
-          then:
-            - variables:
-                current_low_entities: "{{ current_low_entities + [ent] }}"
-                current_low_batteries: "{{ current_low_batteries + [{'name': display_name, 'lvl': lvl}] }}"
-
-  - repeat:
-      for_each: "{{ memory_list }}"
-      sequence:
-        - variables:
-            mem_ent: "{{ repeat.item }}"
-            mem_raw: "{{ states(repeat.item) | string }}"
-            mem_norm: "{{ mem_raw | trim | lower | replace(',', '.') | replace('%', '') | replace(' ', '') }}"
-            mem_lvl: >-
-              {% set v_float = mem_norm | float(default=-1) %}
-              {% if v_float < 0 or v_float > 100 %}
-                -1
-              {% else %}
-                {{ v_float }}
-              {% endif %}
-            mem_display_name: "{{ state_attr(repeat.item, 'friendly_name') or repeat.item }}"
-
-        - if:
-            - condition: template
-              value_template: "{{ mem_ent not in current_low_entities }}"
-          then:
-            - if:
-                - condition: template
-                  value_template: "{{ mem_lvl == -1 }}"
-              then:
-                - variables:
-                    unavailable_memory_entities: "{{ unavailable_memory_entities + [mem_ent] }}"
-              else:
-                - if:
-                    - condition: template
-                      value_template: "{{ mem_lvl >= 0 and mem_lvl > threshold + 2 }}"
-                  then:
-                    - variables:
-                        recovered_batteries: "{{ recovered_batteries + [{'name': mem_display_name, 'lvl': mem_lvl}] }}"
-
-  - variables:
-      next_memory_entities: "{{ (current_low_entities + unavailable_memory_entities) | unique | list }}"
-
-  - if:
-      - condition: template
-        value_template: "{{ debug and invalid_entities | length > 0 }}"
-    then:
-      - service: persistent_notification.create
-        data:
-          notification_id: "battery_monitor_debug"
-          title: "Battery Monitor Debug - Invalid Entities"
-          message: >-
-            Invalid battery entities (check if *_battery_state was selected by mistake):
-
-            {% for item in invalid_entities %}
-            entity_id: {{ item.ent }}
-            raw state: {{ item.raw }}
-            unit: {{ item.unit }}
-
-            {% endfor %}
+      message_text: >-
+        {%- set labels = low_labels if (low_labels is iterable and low_labels is not string and low_labels is not mapping) else [] -%}
+        {%- set total = labels | length -%}
+        {%- set limit = [max_message_length | int(180), 40] | max -%}
+        {%- set fit = namespace(parts=[], stop=false) -%}
+        {%- for item in labels -%}
+          {%- if not fit.stop -%}
+            {%- set pct_txt = '(' ~ item['pct'] ~ '%)' -%}
+            {%- set text = item['label'] ~ ' ' ~ pct_txt -%}
+            {%- set trial_parts = fit.parts + [text] -%}
+            {%- set remaining = total - (trial_parts | length) -%}
+            {%- set suffix = (' +' ~ remaining ~ ' ďalších') if remaining > 0 else '' -%}
+            {%- set trial = (trial_parts | join('; ')) ~ suffix -%}
+            {%- if (trial | length) <= limit -%}
+              {%- set fit.parts = trial_parts -%}
+            {%- elif (fit.parts | length) == 0 -%}
+              {%- set budget = [limit - (suffix | length), 1] | max -%}
+              {%- set name_budget = [budget - (pct_txt | length) - 1, 0] | max -%}
+              {%- set over = (item['label'] | length) > name_budget or (text | length) > budget -%}
+              {%- set name_cut = (name_budget - 1) if (over and name_budget > 1) else name_budget -%}
+              {%- set ellipsis = '…' if (over and name_budget > 1) else '' -%}
+              {%- set cut_label = ((item['label'][:name_cut] | trim) ~ ellipsis) if over else item['label'] -%}
+              {%- set shortened = (cut_label ~ ' ' ~ pct_txt) | trim -%}
+              {%- set fit.parts = [shortened] if shortened else [] -%}
+              {%- set fit.stop = true -%}
+            {%- else -%}
+              {%- set fit.stop = true -%}
+            {%- endif -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- set body = fit.parts | join('; ') -%}
+        {%- set remaining = total - (fit.parts | length) -%}
+        {%- if remaining > 0 and body -%}
+          {{- (body ~ ' +' ~ remaining ~ ' ďalších') | replace('\n', '') | replace('\r', '') | trim -}}
+        {%- else -%}
+          {{- body | replace('\n', '') | replace('\r', '') | trim -}}
+        {%- endif -%}
 
   - choose:
-      - conditions: "{{ current_low_batteries | length > 0 }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ message_text | length > 0 }}"
         sequence:
-          - if:
-              - condition: template
-                value_template: "{{ notify_services_filtered | length > 0 }}"
-            then:
-              - repeat:
-                  for_each: "{{ notify_services_filtered }}"
-                  sequence:
-                    - service: "{{ repeat.item }}"
-                      data:
-                        title: "Low Battery Warning"
-                        message: >-
-                          Devices below {{ threshold }}%:
-
-                          {% for item in current_low_batteries %}
-                          - {{ item.name }} ({{ item.lvl | round(0) }}%)
-                          {% endfor %}
-            else:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_services_filtered | length > 0 }}"
+                sequence:
+                  - repeat:
+                      for_each: "{{ notify_services_filtered }}"
+                      sequence:
+                        - service: "{{ repeat.item }}"
+                          data:
+                            title: "{{ notify_title }}"
+                            message: "{{ message_text }}"
+            default:
               - if:
                   - condition: template
-                    value_template: "{{ use_persistent_fallback }}"
+                    value_template: "{{ use_persistent_fallback | bool(false) }}"
                 then:
                   - service: persistent_notification.create
                     data:
-                      notification_id: "battery_low"
-                      title: "Low Battery Warning"
-                      message: >-
-                        Devices below {{ threshold }}%:
-
-                        {% for item in current_low_batteries %}
-                        - {{ item.name }} ({{ item.lvl | round(0) }}%)
-                        {% endfor %}
-
-  - choose:
-      - conditions: "{{ recovered_batteries | length > 0 }}"
-        sequence:
-          - if:
-              - condition: template
-                value_template: "{{ notify_services_filtered | length > 0 }}"
-            then:
-              - repeat:
-                  for_each: "{{ notify_services_filtered }}"
-                  sequence:
-                    - service: "{{ repeat.item }}"
-                      data:
-                        title: "Battery Recovered"
-                        message: >-
-                          Devices back above {{ threshold }}%:
-
-                          {% for item in recovered_batteries %}
-                          - {{ item.name }} ({{ item.lvl | round(0) }}%)
-                          {% endfor %}
-            else:
-              - if:
-                  - condition: template
-                    value_template: "{{ use_persistent_fallback }}"
-                then:
-                  - service: persistent_notification.create
-                    data:
-                      notification_id: "battery_recovered"
-                      title: "Battery Recovered"
-                      message: >-
-                        Devices back above {{ threshold }}%:
-
-                        {% for item in recovered_batteries %}
-                        - {{ item.name }} ({{ item.lvl | round(0) }}%)
-                        {% endfor %}
-
-  - service: input_text.set_value
-    target:
-      entity_id: !input memory_helper
-    data:
-      value: "{{ next_memory_entities | to_json }}"
+                      notification_id: battery_low
+                      title: "{{ notify_title }}"
+                      message: "{{ message_text }}"
