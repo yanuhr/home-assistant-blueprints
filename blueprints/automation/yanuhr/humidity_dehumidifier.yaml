@@ -1,0 +1,190 @@
+# Blueprint: Automatické riadenie odvlhčovača s hysteréziou
+# Doména: automation | Bez custom komponentov, helperov a periodického pollingu
+blueprint:
+  name: Automatické riadenie odvlhčovača s hysteréziou
+  author: yanuhr
+  description: >
+    Univerzálne riadenie odvlhčovača (switch) podľa senzora relatívnej vlhkosti
+    s dvojprahovou hysterézou. Jedna inštancia automatizácie = jedna miestnosť.
+
+    **Logika**
+    - Vlhkosť **nad** hornou hranicou a odvlhčovač `off` → `switch.turn_on`
+    - Vlhkosť **pod** dolnou hranicou a odvlhčovač `on` → `switch.turn_off`
+    - Vlhkosť medzi hranicami vrátane hraničných hodnôt → stav sa nemení
+    - Redundantné príkazy sa neodosielajú (kontrola aktuálneho stavu switchu)
+
+    **Inicializácia**
+    Po štarte Home Assistant alebo po obnovení dostupnosti senzora/switchu
+    sa stav vyhodnotí znova (event-driven, bez periodického pollingu).
+
+    **Bezpečnosť**
+    Pri `unknown`/`unavailable`, nečíselnej hodnote, vlhkosti mimo 0–100 %,
+    nedostupnom switchi alebo pri dolnej hranici ≥ hornej hranici sa nevykoná
+    žiadna akcia. Nedostupná vlhkosť sa nikdy neinterpretuje ako 0 %.
+  domain: automation
+  homeassistant:
+    # Moderná syntax triggers:/actions: a trigger: namiesto platform:
+    min_version: 2024.10.0
+  input:
+    humidity_sensor:
+      name: Senzor relatívnej vlhkosti
+      description: >
+        Entita zo senzora vlhkosti (doména sensor, device_class humidity),
+        podľa ktorej sa riadi odvlhčovač.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: humidity
+
+    dehumidifier_switch:
+      name: Odvlhčovač (switch)
+      description: >
+        Switch entita ovládaného odvlhčovača. Používajú sa výhradne akcie
+        switch.turn_on a switch.turn_off (nikdy toggle).
+      selector:
+        entity:
+          filter:
+            - domain: switch
+
+    humidity_high:
+      name: Horná hranica vlhkosti (zapnutie)
+      description: >
+        Pri prekročení tejto hodnoty (vlhkosť > hranica) a vypnutom
+        odvlhčovači sa odvlhčovač zapne. Predvolené: 50 %.
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    humidity_low:
+      name: Dolná hranica vlhkosti (vypnutie)
+      description: >
+        Pri poklese pod túto hodnotu (vlhkosť < hranica) a zapnutom
+        odvlhčovači sa odvlhčovač vypne. Predvolené: 40 %.
+        Musí byť ostro menšia ako horná hranica.
+      default: 40
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+# -----------------------------------------------------------------------------
+# Premenné z !input pre použitie v Jinja2 šablónach
+# -----------------------------------------------------------------------------
+variables:
+  humidity_sensor: !input humidity_sensor
+  dehumidifier_switch: !input dehumidifier_switch
+  humidity_high: !input humidity_high
+  humidity_low: !input humidity_low
+
+# -----------------------------------------------------------------------------
+# Triggery – event-driven (numeric_state + HA start + obnovenie dostupnosti)
+# -----------------------------------------------------------------------------
+triggers:
+  # Vlhkosť prekročila hornú hranicu (prechod na hodnotu > humidity_high)
+  - trigger: numeric_state
+    entity_id: !input humidity_sensor
+    above: !input humidity_high
+    id: humidity_above_threshold
+
+  # Vlhkosť klesla pod dolnú hranicu (prechod na hodnotu < humidity_low)
+  - trigger: numeric_state
+    entity_id: !input humidity_sensor
+    below: !input humidity_low
+    id: humidity_below_threshold
+
+  # Po reštarte HA – okamžité vyhodnotenie, ak sú entity už dostupné
+  - trigger: homeassistant
+    event: start
+    id: ha_start
+
+  # Po reload-e automatizácií / blueprintov
+  - trigger: event
+    event_type: automation_reloaded
+    id: automation_reloaded
+
+  # Senzor sa vrátil z unknown/unavailable → opätovné vyhodnotenie
+  - trigger: state
+    entity_id: !input humidity_sensor
+    from:
+      - unavailable
+      - unknown
+    id: humidity_sensor_available
+
+  # Switch sa vrátil do platného stavu on/off → opätovné vyhodnotenie
+  - trigger: state
+    entity_id: !input dehumidifier_switch
+    from:
+      - unavailable
+      - unknown
+    to:
+      - "on"
+      - "off"
+    id: dehumidifier_available
+
+# -----------------------------------------------------------------------------
+# Globálne podmienky – neplatná konfigurácia prahov = žiadna akcia
+# -----------------------------------------------------------------------------
+conditions:
+  - condition: template
+    value_template: "{{ (humidity_low | float(0)) < (humidity_high | float(0)) }}"
+
+# -----------------------------------------------------------------------------
+# Akcie – pred každým príkazom overenie aktuálnej vlhkosti aj stavu switchu
+# -----------------------------------------------------------------------------
+actions:
+  # Výpočet požadovanej akcie z aktuálnych stavov (nie z histórie triggeru)
+  - variables:
+      desired_action: >-
+        {% set raw = states(humidity_sensor) | string | trim
+             | replace('%', '') | replace(' ', '') | replace(',', '.') %}
+        {% set sw = states(dehumidifier_switch) %}
+        {% set high = humidity_high | float(50) %}
+        {% set low = humidity_low | float(40) %}
+        {% if raw in ['unknown', 'unavailable', 'none', 'null', '']
+             or not is_number(raw) %}
+          none
+        {% elif (raw | float) < 0 or (raw | float) > 100 %}
+          none
+        {% elif sw not in ['on', 'off'] %}
+          none
+        {% elif low >= high %}
+          none
+        {% elif (raw | float) > high and sw == 'off' %}
+          turn_on
+        {% elif (raw | float) < low and sw == 'on' %}
+          turn_off
+        {% else %}
+          none
+        {% endif %}
+
+  - choose:
+      # Zapnutie len ak je odvlhčovač skutočne vypnutý a vlhkosť > horná hranica
+      - conditions:
+          - condition: template
+            value_template: "{{ desired_action == 'turn_on' }}"
+        sequence:
+          - action: switch.turn_on
+            target:
+              entity_id: "{{ dehumidifier_switch }}"
+
+      # Vypnutie len ak je odvlhčovač skutočne zapnutý a vlhkosť < dolná hranica
+      - conditions:
+          - condition: template
+            value_template: "{{ desired_action == 'turn_off' }}"
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: "{{ dehumidifier_switch }}"
+
+    # desired_action == 'none' → žiadna akcia (hysterézia / chyba / redundantný príkaz)
+
+mode: single
